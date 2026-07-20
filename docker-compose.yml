@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  timescaledb:
+    image: timescale/timescaledb-ha:pg15
+    container_name: tw_spread_timescaledb
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin_password
+      POSTGRES_DB: spread_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescaledb_data:/home/postgres/pgdata/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - spread_network
+    restart: unless-stopped
+    command: postgres -c max_connections=200 -c shared_buffers=1GB
+
+  redis:
+    image: redis:7.2.4-alpine
+    container_name: tw_spread_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - spread_network
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+volumes:
+  timescaledb_data:
+    name: tw_spread_timescaledb_data
+  redis_data:
+    name: tw_spread_redis_data
+
+networks:
+  spread_network:
+    name: tw_spread_network
+    driver: bridge
