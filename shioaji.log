@@ -68,3 +68,5 @@
 [pid:18064] 2026-07-13T13:23:52.468326Z  INFO _core::api::auth::login: Loaded 53330 contracts after login
 [pid:18064] 2026-07-13T13:23:57.613216Z  INFO shioaji::api::token_pool: Removed invalid token from slot 1
 [pid:18064] 2026-07-13T13:23:57.618229Z  INFO shioaji::api: P2P receiver closed: Closed
+[E 2026-10-07 22:51:23,059 C:\Users\User\.gemini\antigravity\scratch\Quant\venv\lib\site-packages\shioaji\utils.py:49:raise_resp_error] {'status': {'status_code': 400}, 'response': {'token': '', 'accounts': [], 'detail': "Token doesn't have production permission.", 'ip_address': '1.172.176.72', 'person_id': 'E126235679', 'client_name': '', 'contract_download': False, 'web_token': '', 'solace_props': None}}
+[E 2026-10-07 22:51:57,082 C:\Users\User\.gemini\antigravity\scratch\Quant\venv\lib\site-packages\shioaji\utils.py:49:raise_resp_error] {'status': {'status_code': 400}, 'response': {'detail': 'Kbars date range must not exceed 30 days.'}}

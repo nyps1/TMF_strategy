@@ -1,0 +1,25 @@
+# Virtual Environments
+venv/
+.venv/
+env/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+
+# Sensitive Credentials
+.env
+
+# Node Dependencies
+node_modules/
+frontend/node_modules/
+
+# Database and Big Binaries
+*.db
+data/cache/
+data/market_data.db
+
+# Local Temporary Files
+*.tmp
