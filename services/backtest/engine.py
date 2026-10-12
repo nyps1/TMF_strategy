@@ -294,14 +294,14 @@ class BacktestEngine:
                 # 1. 檢核是否有前一根剛成立的候選訊號棒需做「第二根確認」
                 if self.pending_signal_side != PositionSide.NONE and (i - 1 == self.signal_bar_idx):
                     if self.pending_signal_side == PositionSide.LONG:
-                        # 多頭確認條件 (真實成本版): ((close <= close[1]) or (close >= q1_long))
-                        is_confirmed = (cur_close <= self.signal_bar_close) or (cur_close >= self.signal_bar_q1)
+                        # 多頭確認條件 (嚴格拉回確認版): 既不追高 (close <= close[1]) 且防守於頂部 1/4 強勢支撐 (close >= q1_long)
+                        is_confirmed = (cur_close <= self.signal_bar_close) and (cur_close >= self.signal_bar_q1)
                         if is_confirmed:
                             self.entry_ready_side = PositionSide.LONG
                             self.entry_sl_price = self.signal_bar_extreme
                     elif self.pending_signal_side == PositionSide.SHORT:
-                        # 空頭確認條件 (真實成本版): ((close >= close[1]) or (close <= q1_short))
-                        is_confirmed = (cur_close >= self.signal_bar_close) or (cur_close <= self.signal_bar_q1)
+                        # 空頭確認條件 (嚴格拉回確認版): 既不追空 (close >= close[1]) 且防守於底部 1/4 強勢壓力 (close <= q1_short)
+                        is_confirmed = (cur_close >= self.signal_bar_close) and (cur_close <= self.signal_bar_q1)
                         if is_confirmed:
                             self.entry_ready_side = PositionSide.SHORT
                             self.entry_sl_price = self.signal_bar_extreme

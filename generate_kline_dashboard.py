@@ -18,7 +18,7 @@ from typing import Dict, Any, List, Tuple
 import pandas as pd
 
 from services.storage import KlineService
-from services.backtest import BacktestEngine, BacktestConfig, BacktestMetrics, PositionSide, ExitReason
+from services.backtest import BacktestEngine, BacktestConfig, BacktestMetrics, PositionSide, ExitReason, BacktestReporter
 
 logger = logging.getLogger("DashboardGenerator")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -157,6 +157,12 @@ def run_strategy_backtest(bars_5m: List[Dict[str, Any]]) -> Tuple[BacktestMetric
         f"回測完成: 總筆數 {metrics.total_trades}, 淨損益 {metrics.total_net_profit:,.0f} 元, "
         f"勝率 {metrics.win_rate_pct:.2f}%, 獲利因子 {metrics.profit_factor:.3f}, Markers 共 {len(markers)} 個。"
     )
+
+    try:
+        reporter = BacktestReporter(metrics)
+        reporter.export_trades_csv("trades.csv")
+    except Exception as e:
+        logger.warning(f"匯出 trades.csv 警告 (檔案可能被外部開啟): {e}")
 
     return metrics, markers, cumulative_pnl_curve
 
@@ -648,7 +654,7 @@ def build_html_content(
         <div class="symbol-badge">
             <span class="symbol-name">微型台指期 10</span>
             <span class="symbol-code">TMFJ6</span>
-            <span class="strategy-tag">動態布林突破策略 (真實成本版)</span>
+            <span class="strategy-tag">動態布林突破策略 (嚴格拉回確認版)</span>
         </div>
 
         <!-- 週期切換按鈕群組 (1,2,3,5,15,30,45分 / 1,2,4小時 / 1天) -->
