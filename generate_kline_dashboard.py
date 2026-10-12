@@ -191,6 +191,27 @@ def build_html_content(
     markers_json = json.dumps(markers, ensure_ascii=False)
     pnl_json = json.dumps(cumulative_pnl, ensure_ascii=False)
 
+    # 序列化 60 筆交易完整明細 (與 trades.csv 100% 欄位對齊)
+    trades_list = []
+    for t in metrics.trades:
+        trades_list.append({
+            "trade_id": t.trade_id,
+            "side": t.side.value,
+            "entry_time": t.entry_time,
+            "entry_price": float(t.entry_price),
+            "exit_time": t.exit_time,
+            "exit_price": float(t.exit_price),
+            "qty": t.qty,
+            "exit_reason": "停利" if t.exit_reason.value == "ATR_TAKE_PROFIT" else ("停損" if t.exit_reason.value == "STOP_LOSS" else "結算"),
+            "costs": float(t.fee_total + t.tax_total),
+            "net_pnl": float(t.net_pnl),
+            "return_pct": float(t.return_pct),
+            "equity_after": float(t.equity_after),
+            "entry_ts": int(pd.Timestamp(t.entry_time).timestamp()),
+            "exit_ts": int(pd.Timestamp(t.exit_time).timestamp())
+        })
+    trades_json = json.dumps(trades_list, ensure_ascii=False)
+
     # 格式化統計指標供前端直接呈現
     net_pnl_sign = "+" if metrics.total_net_profit >= 0 else ""
     return_sign = "+" if metrics.total_return_pct >= 0 else ""
@@ -633,6 +654,82 @@ def build_html_content(
             background-color: #f23645;
         }}
 
+        /* 5. 交易明細清單表格樣式 (與 trades.csv 100% 逐行完全對齊) */
+        .trades-table-container-wrapper {{
+            flex: 1;
+            position: relative;
+            width: 100%;
+            height: 100%;
+            overflow-y: auto;
+            background: #0d0e12;
+            display: none;
+        }}
+        .trades-table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            color: #d1d4dc;
+        }}
+        .trades-table th {{
+            position: sticky;
+            top: 0;
+            background: #141720;
+            color: #787b86;
+            font-weight: 600;
+            padding: 8px 12px;
+            text-align: left;
+            border-bottom: 1px solid #232733;
+            z-index: 2;
+            white-space: nowrap;
+        }}
+        .trades-table td {{
+            padding: 7px 12px;
+            border-bottom: 1px solid #161922;
+            white-space: nowrap;
+        }}
+        .trades-table tr:hover {{
+            background: #181c28;
+            cursor: pointer;
+        }}
+        .badge-side-long {{
+            background: rgba(8, 153, 129, 0.18);
+            color: #089981;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 700;
+        }}
+        .badge-side-short {{
+            background: rgba(242, 54, 69, 0.18);
+            color: #f23645;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 700;
+        }}
+        .pnl-positive {{
+            color: #089981;
+            font-weight: 700;
+        }}
+        .pnl-negative {{
+            color: #f23645;
+            font-weight: 700;
+        }}
+        .btn-focus-trade {{
+            background: #1e2230;
+            color: #d1d4dc;
+            border: 1px solid #2e3448;
+            padding: 2px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.15s;
+        }}
+        .btn-focus-trade:hover {{
+            background: #089981;
+            color: #ffffff;
+            border-color: #089981;
+        }}
+
         /* 浮水印 */
         .watermark {{
             position: absolute;
@@ -754,6 +851,7 @@ def build_html_content(
                     <div class="perf-title">績效 <span class="perf-title-info">ⓘ</span></div>
                     <div class="perf-tab-list">
                         <div class="perf-tab active" id="tab-cum-pnl">累計損益</div>
+                        <div class="perf-tab" id="tab-trades-table">📋 交易明細清單 (60 筆)</div>
                         <div class="perf-tab" title="基準對比">買進並持有 <span class="perf-tab-icon">👁️‍🗨️</span></div>
                         <div class="perf-tab" title="交易風險">交易波動幅度 <span class="perf-tab-icon">👁️‍🗨️</span></div>
                         <div class="perf-tab">漲幅與回撤 <span class="perf-tab-icon">▾</span></div>
@@ -767,7 +865,7 @@ def build_html_content(
             </div>
 
             <!-- 累計損益圖表容器 -->
-            <div class="perf-chart-container-wrapper">
+            <div class="perf-chart-container-wrapper" id="perf-chart-wrapper">
                 <div class="perf-legend" id="perf-legend">
                     <span style="color:#787b86;">累計損益:</span>
                     <span class="perf-legend-val" id="perf-legend-val">--</span>
@@ -777,6 +875,30 @@ def build_html_content(
                 <div id="perf-chart-container"></div>
             </div>
 
+            <!-- 交易明細清單表格 (與 trades.csv 100% 逐行完全對齊) -->
+            <div class="trades-table-container-wrapper" id="trades-table-wrapper">
+                <table class="trades-table">
+                    <thead>
+                        <tr>
+                            <th>編號</th>
+                            <th>方向</th>
+                            <th>進場時間</th>
+                            <th>進場價格</th>
+                            <th>出場時間</th>
+                            <th>出場價格</th>
+                            <th>口數</th>
+                            <th>出場原因</th>
+                            <th>手續費+稅</th>
+                            <th>淨損益 (TWD)</th>
+                            <th>帳戶總淨值</th>
+                            <th>圖表定位</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trades-table-body">
+                    </tbody>
+                </table>
+            </div>
+
             <!-- 底部盈虧狀態區段彩條 -->
             <div class="pnl-ribbon-bar" id="pnl-ribbon-bar"></div>
         </div>
@@ -784,11 +906,12 @@ def build_html_content(
     </div>
 
     <script>
-        // 資料載入：K 線、交易 Markers、累計損益時序、指標
+        // 資料載入：K 線、交易 Markers、累計損益時序、指標、交易明細 (60筆)
         const KLINE_DATA = {data_json};
         const RAW_MARKERS = {markers_json};
         const CUMULATIVE_PNL = {pnl_json};
         const METRICS = {metrics_json};
+        const TRADES_DATA = {trades_json};
 
         let currentInterval = '5m';
         let showMarkers = true;
@@ -808,6 +931,10 @@ def build_html_content(
         // DOM 元素快取
         const klineContainer = document.getElementById('kline-container');
         const perfContainer = document.getElementById('perf-chart-container');
+        const perfChartWrapper = document.getElementById('perf-chart-wrapper');
+        const tradesTableWrapper = document.getElementById('trades-table-wrapper');
+        const tabCumPnl = document.getElementById('tab-cum-pnl');
+        const tabTradesTable = document.getElementById('tab-trades-table');
         const legendTime = document.getElementById('legend-time');
         const legendOpen = document.getElementById('legend-open');
         const legendHigh = document.getElementById('legend-high');
@@ -1293,6 +1420,31 @@ def build_html_content(
                 if (perfChart) perfChart.timeScale().fitContent();
             }});
 
+            // 頁籤切換：累計損益 vs 交易明細清單 (60筆)
+            if (tabCumPnl && tabTradesTable) {{
+                tabCumPnl.addEventListener('click', () => {{
+                    tabCumPnl.classList.add('active');
+                    tabTradesTable.classList.remove('active');
+                    if (perfChartWrapper) perfChartWrapper.style.display = 'block';
+                    if (tradesTableWrapper) tradesTableWrapper.style.display = 'none';
+                    if (pnlRibbonBar) pnlRibbonBar.style.display = 'flex';
+                    if (perfChart) {{
+                        perfChart.applyOptions({{
+                            width: perfContainer.clientWidth,
+                            height: perfContainer.clientHeight
+                        }});
+                    }}
+                }});
+
+                tabTradesTable.addEventListener('click', () => {{
+                    tabTradesTable.classList.add('active');
+                    tabCumPnl.classList.remove('active');
+                    if (perfChartWrapper) perfChartWrapper.style.display = 'none';
+                    if (tradesTableWrapper) tradesTableWrapper.style.display = 'block';
+                    if (pnlRibbonBar) pnlRibbonBar.style.display = 'none';
+                }});
+            }}
+
             // 視窗 Resize 自適應
             window.addEventListener('resize', () => {{
                 if (klineChart) {{
@@ -1310,6 +1462,58 @@ def build_html_content(
             }});
         }}
 
+        // 渲染交易明細清單表格 (100% 逐行完全對齊 trades.csv)
+        function renderTradesTable() {{
+            const tbody = document.getElementById('trades-table-body');
+            if (!tbody || !TRADES_DATA) return;
+            tbody.innerHTML = '';
+
+            TRADES_DATA.forEach(t => {{
+                const tr = document.createElement('tr');
+                const isLong = t.side === 'LONG';
+                const isProfit = t.net_pnl >= 0;
+                const pnlSign = isProfit ? '+' : '';
+                const pnlClass = isProfit ? 'pnl-positive' : 'pnl-negative';
+
+                tr.innerHTML = `
+                    <td style="font-weight:700; color:#9299a8;">#${{t.trade_id}}</td>
+                    <td><span class="${{isLong ? 'badge-side-long' : 'badge-side-short'}}">${{isLong ? '做多 (LONG)' : '放空 (SHORT)'}}</span></td>
+                    <td>${{t.entry_time}}</td>
+                    <td style="font-weight:600;">${{Number(t.entry_price).toFixed(1)}}</td>
+                    <td>${{t.exit_time}}</td>
+                    <td style="font-weight:600;">${{Number(t.exit_price).toFixed(1)}}</td>
+                    <td>${{t.qty}} 口</td>
+                    <td>${{t.exit_reason}}</td>
+                    <td style="color:#787b86;">${{Number(t.costs).toFixed(0)}} 元</td>
+                    <td class="${{pnlClass}}">${{pnlSign}}${{Number(t.net_pnl).toLocaleString('zh-TW', {{minimumFractionDigits: 1}})}}</td>
+                    <td style="color:#ffffff; font-weight:600;">${{Number(t.equity_after).toLocaleString('zh-TW', {{minimumFractionDigits: 1}})}}</td>
+                    <td><button class="btn-focus-trade" title="點擊在上方圖表聚焦定位">📍 聚焦</button></td>
+                `;
+
+                tr.addEventListener('click', () => {{
+                    focusTradeOnChart(t.entry_ts, t.exit_ts);
+                }});
+
+                tbody.appendChild(tr);
+            }});
+        }}
+
+        // 在圖表上聚焦定位指定交易
+        function focusTradeOnChart(entryTs, exitTs) {{
+            if (!klineChart) return;
+            const pad = 3600 * 2;
+            const from = entryTs - pad;
+            const to = exitTs + pad;
+            try {{
+                klineChart.timeScale().setVisibleRange({{ from: from, to: to }});
+                if (perfChart) {{
+                    perfChart.timeScale().setVisibleRange({{ from: from, to: to }});
+                }}
+            }} catch (e) {{
+                console.warn('聚焦定位時序範圍自適應:', e);
+            }}
+        }}
+
         // 全域初始化入口
         function initDashboard() {{
             renderKeyMetrics();
@@ -1317,6 +1521,7 @@ def build_html_content(
             initPerfChart();
             setupTimeScaleSync();
             setupEventListeners();
+            renderTradesTable();
             loadIntervalData(currentInterval);
         }}
 
