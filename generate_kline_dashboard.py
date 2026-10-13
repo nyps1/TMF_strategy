@@ -191,9 +191,11 @@ def build_html_content(
     markers_json = json.dumps(markers, ensure_ascii=False)
     pnl_json = json.dumps(cumulative_pnl, ensure_ascii=False)
 
-    # 序列化 60 筆交易完整明細 (與 trades.csv 100% 欄位對齊)
+    # 序列化 64 筆交易完整明細 (與 trades.csv 100% 欄位對齊，並注入累計損益 cum_pnl)
     trades_list = []
+    running_cum_pnl = 0.0
     for t in metrics.trades:
+        running_cum_pnl += t.net_pnl
         trades_list.append({
             "trade_id": t.trade_id,
             "side": t.side.value,
@@ -205,6 +207,7 @@ def build_html_content(
             "exit_reason": "停利" if t.exit_reason.value == "ATR_TAKE_PROFIT" else ("停損" if t.exit_reason.value == "STOP_LOSS" else "結算"),
             "costs": float(t.fee_total + t.tax_total),
             "net_pnl": float(t.net_pnl),
+            "cum_pnl": round(running_cum_pnl, 2),
             "return_pct": float(t.return_pct),
             "equity_after": float(t.equity_after),
             "entry_ts": int(pd.Timestamp(t.entry_time).timestamp()),
@@ -602,13 +605,115 @@ def build_html_content(
             background: #1f2330;
         }}
 
-        /* 3. 累計損益圖表容器 */
+        /* 3. 新增：固定 Y 軸(交易次數) × X 軸(損益/淨值) 圖表容器樣式 */
+        .trade-equity-container-wrapper {{
+            flex: 1;
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background: #0d0e12;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }}
+        .trade-chart-header-info {{
+            height: 28px;
+            background: #111318;
+            border-bottom: 1px solid #1a1e28;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            font-size: 11px;
+            flex-shrink: 0;
+            user-select: none;
+        }}
+        .trade-chart-header-info .info-tag {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }}
+        .trade-chart-header-info .mode-tag {{
+            color: #2962ff;
+            font-weight: 600;
+        }}
+        .trade-chart-header-info .tip-tag {{
+            color: #787b86;
+        }}
+        .canvas-scroll-viewport {{
+            flex: 1;
+            position: relative;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background: #0d0e12;
+        }}
+        #trade-equity-canvas {{
+            display: block;
+            cursor: crosshair;
+        }}
+        .trade-tooltip {{
+            position: absolute;
+            z-index: 50;
+            pointer-events: none;
+            background: rgba(17, 19, 24, 0.95);
+            border: 1px solid #2e3448;
+            border-radius: 6px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+            padding: 10px 14px;
+            font-size: 11px;
+            line-height: 1.5;
+            color: #d1d4dc;
+            display: none;
+            white-space: nowrap;
+            backdrop-filter: blur(4px);
+        }}
+        .trade-tooltip .tt-title {{
+            font-weight: 700;
+            font-size: 12px;
+            color: #ffffff;
+            margin-bottom: 4px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #242838;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }}
+        .trade-tooltip .tt-row {{
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin: 2px 0;
+        }}
+        .trade-tooltip .tt-label {{
+            color: #787b86;
+        }}
+        .trade-tooltip .tt-val {{
+            font-weight: 600;
+        }}
+        .trade-tooltip .tt-val.win {{
+            color: #089981;
+        }}
+        .trade-tooltip .tt-val.loss {{
+            color: #f23645;
+        }}
+        .trade-tooltip .tt-footer {{
+            margin-top: 6px;
+            padding-top: 4px;
+            border-top: 1px dashed #242838;
+            color: #2962ff;
+            font-size: 10px;
+        }}
+
+        /* 4. 原累計損益圖表容器 (時間軸版) */
         .perf-chart-container-wrapper {{
             flex: 1;
             position: relative;
             width: 100%;
             height: 100%;
             background: #0d0e12;
+            display: none;
         }}
         #perf-chart-container {{
             width: 100%;
@@ -848,24 +953,34 @@ def build_html_content(
             <!-- 績效圖表頂部切換列 -->
             <div class="perf-header-bar">
                 <div class="perf-title-group">
-                    <div class="perf-title">績效 <span class="perf-title-info">ⓘ</span></div>
+                    <div class="perf-title">績效儀表板 <span class="perf-title-info">ⓘ</span></div>
                     <div class="perf-tab-list">
-                        <div class="perf-tab active" id="tab-cum-pnl">累計損益</div>
-                        <div class="perf-tab" id="tab-trades-table">📋 交易明細清單 (60 筆)</div>
-                        <div class="perf-tab" title="基準對比">買進並持有 <span class="perf-tab-icon">👁️‍🗨️</span></div>
-                        <div class="perf-tab" title="交易風險">交易波動幅度 <span class="perf-tab-icon">👁️‍🗨️</span></div>
-                        <div class="perf-tab">漲幅與回撤 <span class="perf-tab-icon">▾</span></div>
+                        <div class="perf-tab active" id="tab-trade-equity">📊 交易損益淨值圖 (固定Y軸次數 × X軸損益)</div>
+                        <div class="perf-tab" id="tab-cum-pnl">📈 時間時序走勢 (Time-based)</div>
+                        <div class="perf-tab" id="tab-trades-table">📋 交易明細清單 (64 筆)</div>
                     </div>
                 </div>
                 <div class="perf-tools">
-                    <button class="perf-tool-btn" title="設定">⚙️</button>
-                    <button class="perf-tool-btn" title="截圖">📷</button>
-                    <button class="perf-tool-btn" title="全螢幕">⛶</button>
+                    <button class="perf-tool-btn" id="btn-flip-axes" title="翻轉軸向 (Y軸交易次數 ⇄ X軸交易次數)">🔄 翻轉軸向</button>
+                    <button class="perf-tool-btn" id="btn-toggle-deltas" title="切換顯示單筆損益長條 (Delta Bars)">📊 單筆盈虧條: 開</button>
+                    <button class="perf-tool-btn" id="btn-fit-trade-chart" title="適配全屏">⛶ 適配</button>
                 </div>
             </div>
 
-            <!-- 累計損益圖表容器 -->
-            <div class="perf-chart-container-wrapper" id="perf-chart-wrapper">
+            <!-- 1. 新增：固定 Y 軸(交易次數) × X 軸(損益/淨值) 圖表容器 (預設顯示) -->
+            <div class="trade-equity-container-wrapper" id="trade-equity-wrapper">
+                <div class="trade-chart-header-info" id="trade-chart-info">
+                    <span class="info-tag mode-tag" id="current-mode-tag">當前視圖: 縱軸 Y = 交易次數 (Trade #1 ~ #64) ｜ 橫軸 X = 累積損益 (TWD) & 帳戶淨值</span>
+                    <span class="info-tag tip-tag">💡 支援滑鼠滾輪縮放/拖曳平移，Hover 檢視明細，點擊任一交易節點可定位上方 K 線圖</span>
+                </div>
+                <div class="canvas-scroll-viewport" id="canvas-scroll-viewport">
+                    <canvas id="trade-equity-canvas"></canvas>
+                </div>
+                <div class="trade-tooltip" id="trade-tooltip"></div>
+            </div>
+
+            <!-- 2. 原累計損益圖表容器 (時間軸版，預設隱藏) -->
+            <div class="perf-chart-container-wrapper" id="perf-chart-wrapper" style="display:none;">
                 <div class="perf-legend" id="perf-legend">
                     <span style="color:#787b86;">累計損益:</span>
                     <span class="perf-legend-val" id="perf-legend-val">--</span>
@@ -933,8 +1048,20 @@ def build_html_content(
         const perfContainer = document.getElementById('perf-chart-container');
         const perfChartWrapper = document.getElementById('perf-chart-wrapper');
         const tradesTableWrapper = document.getElementById('trades-table-wrapper');
+        const tabTradeEquity = document.getElementById('tab-trade-equity');
         const tabCumPnl = document.getElementById('tab-cum-pnl');
         const tabTradesTable = document.getElementById('tab-trades-table');
+
+        const tradeEquityWrapper = document.getElementById('trade-equity-wrapper');
+        const tradeEquityCanvas = document.getElementById('trade-equity-canvas');
+        const canvasScrollViewport = document.getElementById('canvas-scroll-viewport');
+        const tradeTooltip = document.getElementById('trade-tooltip');
+        const btnFlipAxes = document.getElementById('btn-flip-axes');
+        const btnToggleDeltas = document.getElementById('btn-toggle-deltas');
+        const btnFitTradeChart = document.getElementById('btn-fit-trade-chart');
+        const currentModeTag = document.getElementById('current-mode-tag');
+
+        let tradeEquityChart = null;
         const legendTime = document.getElementById('legend-time');
         const legendOpen = document.getElementById('legend-open');
         const legendHigh = document.getElementById('legend-high');
@@ -1414,36 +1541,627 @@ def build_html_content(
                 }}
             }});
 
+        // ==============================================================
+        // 固定 Y 軸 (交易次數) × X 軸 (損益 / 帳戶淨值) Canvas 高效互動圖表引擎
+        // ==============================================================
+        class TradeEquityChart {{
+            constructor(canvas, viewport, tooltip) {{
+                this.canvas = canvas;
+                this.viewport = viewport;
+                this.tooltip = tooltip;
+                this.ctx = canvas.getContext('2d');
+                
+                // 預設模式：'Y_TRADES_X_PNL' (符合使用者文字指定：縱軸 Y 為交易次數，橫軸 X 為累積損益)
+                this.mode = 'Y_TRADES_X_PNL';
+                this.showDeltas = true;
+                
+                this.hoverIndex = -1;
+                this.trades = TRADES_DATA || [];
+                
+                // 補入第 0 筆期初基準點 (Cum PnL = 0, Equity = 105,150)
+                this.equityPoints = [
+                    {{ trade_id: 0, cum_pnl: 0, equity_after: 105150, net_pnl: 0, exit_reason: '期初基準', side: '--', entry_time: '--', exit_time: '--' }},
+                    ...this.trades
+                ];
+
+                this.initEvents();
+            }}
+
+            initEvents() {{
+                if (!this.canvas) return;
+
+                this.canvas.addEventListener('mousemove', (e) => {{
+                    const rect = this.canvas.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left;
+                    const mouseY = e.clientY - rect.top;
+                    this.handleMouseMove(mouseX, mouseY, e.clientX, e.clientY);
+                }});
+
+                this.canvas.addEventListener('mouseleave', () => {{
+                    this.hoverIndex = -1;
+                    if (this.tooltip) this.tooltip.style.display = 'none';
+                    this.draw();
+                }});
+
+                this.canvas.addEventListener('click', () => {{
+                    if (this.hoverIndex > 0 && this.hoverIndex <= this.trades.length) {{
+                        const t = this.trades[this.hoverIndex - 1];
+                        if (t && t.entry_ts && t.exit_ts) {{
+                            focusTradeOnChart(t.entry_ts, t.exit_ts);
+                        }}
+                    }}
+                }});
+            }}
+
+            handleMouseMove(mx, my, clientX, clientY) {{
+                if (!this.layout) return;
+                const L = this.layout;
+                const total = this.equityPoints.length;
+
+                let bestIdx = -1;
+                let minDist = 999999;
+
+                if (this.mode === 'Y_TRADES_X_PNL') {{
+                    for (let i = 0; i < total; i++) {{
+                        const py = L.getY(i);
+                        const dist = Math.abs(my - py);
+                        if (dist < minDist) {{
+                            minDist = dist;
+                            bestIdx = i;
+                        }}
+                    }}
+                }} else {{
+                    for (let i = 0; i < total; i++) {{
+                        const px = L.getX(i);
+                        const dist = Math.abs(mx - px);
+                        if (dist < minDist) {{
+                            minDist = dist;
+                            bestIdx = i;
+                        }}
+                    }}
+                }}
+
+                if (bestIdx !== this.hoverIndex) {{
+                    this.hoverIndex = bestIdx;
+                    this.draw();
+                }}
+
+                this.showTooltip(bestIdx, clientX, clientY);
+            }}
+
+            showTooltip(idx, clientX, clientY) {{
+                if (!this.tooltip || idx < 0 || idx >= this.equityPoints.length) {{
+                    if (this.tooltip) this.tooltip.style.display = 'none';
+                    return;
+                }}
+
+                const pt = this.equityPoints[idx];
+                const isOrigin = (idx === 0);
+                const isWin = pt.net_pnl >= 0;
+                const pnlSign = isWin ? '+' : '';
+                const cumSign = pt.cum_pnl >= 0 ? '+' : '';
+
+                let html = '';
+                if (isOrigin) {{
+                    html = `
+                        <div class="tt-title">
+                            <span>🏁 期初基準狀態</span>
+                            <span style="color:#787b86;">Trade #0</span>
+                        </div>
+                        <div class="tt-row"><span class="tt-label">初始資金:</span><span class="tt-val">105,150.0 TWD</span></div>
+                        <div class="tt-row"><span class="tt-label">累積損益:</span><span class="tt-val">0.0 TWD</span></div>
+                    `;
+                }} else {{
+                    const sideLabel = pt.side === 'LONG' ? '做多 (LONG)' : '放空 (SHORT)';
+                    const sideColor = pt.side === 'LONG' ? '#089981' : '#f23645';
+                    html = `
+                        <div class="tt-title">
+                            <span>🎯 第 #${{pt.trade_id}} 筆交易</span>
+                            <span style="color:${{sideColor}}; font-weight:700;">${{sideLabel}}</span>
+                        </div>
+                        <div class="tt-row"><span class="tt-label">進場:</span><span class="tt-val">${{pt.entry_time}} @ ${{Number(pt.entry_price).toFixed(1)}}</span></div>
+                        <div class="tt-row"><span class="tt-label">出場:</span><span class="tt-val">${{pt.exit_time}} @ ${{Number(pt.exit_price).toFixed(1)}}</span></div>
+                        <div class="tt-row"><span class="tt-label">平倉原因:</span><span class="tt-val">${{pt.exit_reason}}</span></div>
+                        <div class="tt-row"><span class="tt-label">單筆損益:</span><span class="tt-val ${{isWin ? 'win' : 'loss'}}">${{pnlSign}}${{Number(pt.net_pnl).toLocaleString('zh-TW', {{minimumFractionDigits: 1}})}} TWD</span></div>
+                        <div class="tt-row"><span class="tt-label">累積損益:</span><span class="tt-val ${{pt.cum_pnl >= 0 ? 'win' : 'loss'}}">${{cumSign}}${{Number(pt.cum_pnl).toLocaleString('zh-TW', {{minimumFractionDigits: 1}})}} TWD</span></div>
+                        <div class="tt-row"><span class="tt-label">帳戶總淨值:</span><span class="tt-val" style="color:#ffffff;">${{Number(pt.equity_after).toLocaleString('zh-TW', {{minimumFractionDigits: 1}})}} TWD</span></div>
+                        <div class="tt-footer">📍 點擊此處立即定位上方 K 線圖</div>
+                    `;
+                }}
+
+                this.tooltip.innerHTML = html;
+                this.tooltip.style.display = 'block';
+
+                const tipW = 260;
+                const tipH = 180;
+                let left = clientX + 16;
+                let top = clientY - 40;
+
+                if (left + tipW > window.innerWidth) left = clientX - tipW - 16;
+                if (top + tipH > window.innerHeight) top = window.innerHeight - tipH - 16;
+                if (top < 10) top = 10;
+
+                this.tooltip.style.left = left + 'px';
+                this.tooltip.style.top = top + 'px';
+            }}
+
+            toggleMode() {{
+                this.mode = (this.mode === 'Y_TRADES_X_PNL') ? 'X_TRADES_Y_PNL' : 'Y_TRADES_X_PNL';
+                if (currentModeTag) {{
+                    if (this.mode === 'Y_TRADES_X_PNL') {{
+                        currentModeTag.textContent = '當前視圖: 縱軸 Y = 交易次數 (Trade #1 ~ #64) ｜ 橫軸 X = 累積損益 (TWD) & 帳戶淨值';
+                    }} else {{
+                        currentModeTag.textContent = '當前視圖: 橫軸 X = 交易次數 (Trade #1 ~ #64) ｜ 縱軸 Y = 累積損益 (TWD) & 帳戶淨值';
+                    }}
+                }}
+                this.resizeAndDraw();
+                return this.mode;
+            }}
+
+            toggleDeltas() {{
+                this.showDeltas = !this.showDeltas;
+                this.draw();
+                return this.showDeltas;
+            }}
+
+            resizeAndDraw() {{
+                if (!this.viewport || !this.canvas) return;
+                const dpr = window.devicePixelRatio || 1;
+                const rect = this.viewport.getBoundingClientRect();
+                const width = rect.width;
+                const height = rect.height;
+
+                if (width <= 0 || height <= 0) return;
+
+                this.canvas.width = Math.floor(width * dpr);
+                this.canvas.height = Math.floor(height * dpr);
+                this.canvas.style.width = width + 'px';
+                this.canvas.style.height = height + 'px';
+
+                this.ctx.resetTransform();
+                this.ctx.scale(dpr, dpr);
+
+                this.width = width;
+                this.height = height;
+
+                this.draw();
+            }}
+
+            draw() {{
+                if (!this.width || !this.height) return;
+                const ctx = this.ctx;
+                const w = this.width;
+                const h = this.height;
+
+                ctx.clearRect(0, 0, w, h);
+
+                if (this.mode === 'Y_TRADES_X_PNL') {{
+                    this.drawYTradesXPnl(ctx, w, h);
+                }} else {{
+                    this.drawXTradesYPnl(ctx, w, h);
+                }}
+            }}
+
+            drawYTradesXPnl(ctx, w, h) {{
+                const totalTrades = this.trades.length;
+                if (totalTrades === 0) return;
+
+                const padL = 80;
+                const padR = 40;
+                const padT = 36;
+                const padB = 36;
+
+                const plotW = w - padL - padR;
+                const plotH = h - padT - padB;
+
+                const pnlVals = this.equityPoints.map(p => p.cum_pnl);
+                let minPnl = Math.min(...pnlVals);
+                let maxPnl = Math.max(...pnlVals);
+                if (minPnl > 0) minPnl = 0;
+                if (maxPnl < 0) maxPnl = 0;
+
+                const span = (maxPnl - minPnl) || 1000;
+                const margin = span * 0.12;
+                const dispMin = minPnl - margin;
+                const dispMax = maxPnl + margin;
+
+                const getX = (val) => padL + ((val - dispMin) / (dispMax - dispMin)) * plotW;
+                const getY = (idx) => padT + (idx / totalTrades) * plotH;
+                const zeroX = getX(0);
+
+                ctx.fillStyle = '#0d0e12';
+                ctx.fillRect(0, 0, w, h);
+
+                const numTicksX = Math.max(5, Math.floor(plotW / 130));
+                const step = (dispMax - dispMin) / numTicksX;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto';
+
+                for (let i = 0; i <= numTicksX; i++) {{
+                    const val = dispMin + i * step;
+                    const x = getX(val);
+                    if (x < padL || x > w - padR) continue;
+
+                    const isZero = Math.abs(val) < step * 0.35;
+                    ctx.strokeStyle = isZero ? '#475569' : '#181b24';
+                    ctx.lineWidth = isZero ? 1.5 : 1;
+                    if (isZero) {{
+                        ctx.setLineDash([4, 4]);
+                    }} else {{
+                        ctx.setLineDash([]);
+                    }}
+                    ctx.beginPath();
+                    ctx.moveTo(x, padT);
+                    ctx.lineTo(x, h - padB);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    const sign = val > 0 ? '+' : '';
+                    const labelText = `${{sign}}${{Math.round(val).toLocaleString()}} 元`;
+                    const eqText = `(${{(105150 + Math.round(val)).toLocaleString()}})`;
+
+                    ctx.fillStyle = isZero ? '#38bdf8' : '#64748b';
+                    ctx.fillText(labelText, x, padT - 14);
+                    ctx.fillStyle = '#475569';
+                    ctx.fillText(eqText, x, h - padB + 14);
+                }}
+
+                const stepY = totalTrades > 50 ? 5 : (totalTrades > 20 ? 2 : 1);
+                ctx.textAlign = 'right';
+                for (let i = 0; i <= totalTrades; i += stepY) {{
+                    const y = getY(i);
+                    ctx.strokeStyle = '#161922';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(padL, y);
+                    ctx.lineTo(w - padR, y);
+                    ctx.stroke();
+
+                    const isHover = (i === this.hoverIndex);
+                    ctx.fillStyle = isHover ? '#ffffff' : ((i === totalTrades) ? '#089981' : '#787b86');
+                    ctx.font = isHover ? 'bold 11px sans-serif' : '10px sans-serif';
+                    ctx.fillText(i === 0 ? '期初 #0' : `Trade #${{i}}`, padL - 8, y);
+                }}
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(zeroX, getY(0));
+                for (let i = 0; i <= totalTrades; i++) {{
+                    const pt = this.equityPoints[i];
+                    const px = getX(pt.cum_pnl);
+                    const py = getY(i);
+                    if (i > 0) {{
+                        ctx.lineTo(px, getY(i - 1));
+                    }}
+                    ctx.lineTo(px, py);
+                }}
+                ctx.lineTo(zeroX, getY(totalTrades));
+                ctx.closePath();
+
+                const gradGreen = ctx.createLinearGradient(zeroX, 0, w - padR, 0);
+                gradGreen.addColorStop(0, 'rgba(8, 153, 129, 0.05)');
+                gradGreen.addColorStop(1, 'rgba(8, 153, 129, 0.35)');
+                ctx.fillStyle = gradGreen;
+                ctx.fill();
+                ctx.restore();
+
+                if (this.showDeltas) {{
+                    for (let i = 1; i <= totalTrades; i++) {{
+                        const prevPt = this.equityPoints[i - 1];
+                        const curPt = this.equityPoints[i];
+                        const x0 = getX(prevPt.cum_pnl);
+                        const x1 = getX(curPt.cum_pnl);
+                        const y = getY(i);
+                        const isWin = curPt.net_pnl >= 0;
+
+                        ctx.fillStyle = isWin ? 'rgba(8, 153, 129, 0.7)' : 'rgba(242, 54, 69, 0.7)';
+                        const barH = 5;
+                        const bx = Math.min(x0, x1);
+                        const bw = Math.max(Math.abs(x1 - x0), 2);
+                        ctx.fillRect(bx, y - barH / 2, bw, barH);
+                    }}
+                }}
+
+                ctx.beginPath();
+                ctx.strokeStyle = '#089981';
+                ctx.lineWidth = 2.5;
+                ctx.moveTo(getX(this.equityPoints[0].cum_pnl), getY(0));
+                for (let i = 1; i <= totalTrades; i++) {{
+                    const prevPt = this.equityPoints[i - 1];
+                    const curPt = this.equityPoints[i];
+                    const px = getX(curPt.cum_pnl);
+                    const py = getY(i);
+                    ctx.lineTo(px, getY(i - 1));
+                    ctx.lineTo(px, py);
+                }}
+                ctx.stroke();
+
+                for (let i = 0; i <= totalTrades; i++) {{
+                    const pt = this.equityPoints[i];
+                    const px = getX(pt.cum_pnl);
+                    const py = getY(i);
+                    const isWin = pt.net_pnl >= 0;
+
+                    ctx.fillStyle = (i === 0) ? '#9299a8' : (isWin ? '#089981' : '#f23645');
+                    ctx.beginPath();
+                    ctx.arc(px, py, (i === this.hoverIndex) ? 6 : 3, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    if (i === this.hoverIndex) {{
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                    }}
+                }}
+
+                if (this.hoverIndex >= 0 && this.hoverIndex <= totalTrades) {{
+                    const hPt = this.equityPoints[this.hoverIndex];
+                    const hx = getX(hPt.cum_pnl);
+                    const hy = getY(this.hoverIndex);
+
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([3, 3]);
+                    ctx.beginPath();
+                    ctx.moveTo(padL, hy);
+                    ctx.lineTo(w - padR, hy);
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.moveTo(hx, padT);
+                    ctx.lineTo(hx, h - padB);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }}
+
+                this.layout = {{ mode: 'Y_TRADES_X_PNL', padL, padR, padT, padB, plotW, plotH, dispMin, dispMax, totalTrades, getX, getY }};
+            }}
+
+            drawXTradesYPnl(ctx, w, h) {{
+                const totalTrades = this.trades.length;
+                if (totalTrades === 0) return;
+
+                const padL = 75;
+                const padR = 40;
+                const padT = 36;
+                const padB = 36;
+
+                const plotW = w - padL - padR;
+                const plotH = h - padT - padB;
+
+                const pnlVals = this.equityPoints.map(p => p.cum_pnl);
+                let minPnl = Math.min(...pnlVals);
+                let maxPnl = Math.max(...pnlVals);
+                if (minPnl > 0) minPnl = 0;
+                if (maxPnl < 0) maxPnl = 0;
+
+                const span = (maxPnl - minPnl) || 1000;
+                const margin = span * 0.12;
+                const dispMin = minPnl - margin;
+                const dispMax = maxPnl + margin;
+
+                const getX = (idx) => padL + (idx / totalTrades) * plotW;
+                const getY = (val) => padT + (1 - (val - dispMin) / (dispMax - dispMin)) * plotH;
+                const zeroY = getY(0);
+
+                ctx.fillStyle = '#0d0e12';
+                ctx.fillRect(0, 0, w, h);
+
+                const numTicksY = Math.max(5, Math.floor(plotH / 50));
+                const step = (dispMax - dispMin) / numTicksY;
+                ctx.textAlign = 'right';
+                ctx.textBaseline = 'middle';
+                ctx.font = '10px sans-serif';
+
+                for (let i = 0; i <= numTicksY; i++) {{
+                    const val = dispMin + i * step;
+                    const y = getY(val);
+                    if (y < padT || y > h - padB) continue;
+
+                    const isZero = Math.abs(val) < step * 0.35;
+                    ctx.strokeStyle = isZero ? '#475569' : '#181b24';
+                    ctx.lineWidth = isZero ? 1.5 : 1;
+                    if (isZero) {{
+                        ctx.setLineDash([4, 4]);
+                    }} else {{
+                        ctx.setLineDash([]);
+                    }}
+                    ctx.beginPath();
+                    ctx.moveTo(padL, y);
+                    ctx.lineTo(w - padR, y);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    const sign = val > 0 ? '+' : '';
+                    ctx.fillStyle = isZero ? '#38bdf8' : '#64748b';
+                    ctx.fillText(`${{sign}}${{Math.round(val).toLocaleString()}}`, padL - 8, y);
+                }}
+
+                const stepX = totalTrades > 50 ? 5 : (totalTrades > 20 ? 2 : 1);
+                ctx.textAlign = 'center';
+                for (let i = 0; i <= totalTrades; i += stepX) {{
+                    const x = getX(i);
+                    ctx.strokeStyle = '#161922';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(x, padT);
+                    ctx.lineTo(x, h - padB);
+                    ctx.stroke();
+
+                    const isHover = (i === this.hoverIndex);
+                    ctx.fillStyle = isHover ? '#ffffff' : ((i === totalTrades) ? '#089981' : '#787b86');
+                    ctx.fillText(i === 0 ? '#0' : `#${{i}}`, x, h - padB + 14);
+                }}
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(getX(0), zeroY);
+                for (let i = 0; i <= totalTrades; i++) {{
+                    const pt = this.equityPoints[i];
+                    const px = getX(i);
+                    const py = getY(pt.cum_pnl);
+                    if (i > 0) {{
+                        ctx.lineTo(px, getY(this.equityPoints[i - 1].cum_pnl));
+                    }}
+                    ctx.lineTo(px, py);
+                }}
+                ctx.lineTo(getX(totalTrades), zeroY);
+                ctx.closePath();
+
+                const gradGreen = ctx.createLinearGradient(0, zeroY, 0, padT);
+                gradGreen.addColorStop(0, 'rgba(8, 153, 129, 0.05)');
+                gradGreen.addColorStop(1, 'rgba(8, 153, 129, 0.35)');
+                ctx.fillStyle = gradGreen;
+                ctx.fill();
+                ctx.restore();
+
+                ctx.beginPath();
+                ctx.strokeStyle = '#089981';
+                ctx.lineWidth = 2.5;
+                ctx.moveTo(getX(0), getY(this.equityPoints[0].cum_pnl));
+                for (let i = 1; i <= totalTrades; i++) {{
+                    const prevPt = this.equityPoints[i - 1];
+                    const curPt = this.equityPoints[i];
+                    const px = getX(i);
+                    const py = getY(curPt.cum_pnl);
+                    ctx.lineTo(px, getY(prevPt.cum_pnl));
+                    ctx.lineTo(px, py);
+                }}
+                ctx.stroke();
+
+                for (let i = 0; i <= totalTrades; i++) {{
+                    const pt = this.equityPoints[i];
+                    const px = getX(i);
+                    const py = getY(pt.cum_pnl);
+                    const isWin = pt.net_pnl >= 0;
+
+                    ctx.fillStyle = (i === 0) ? '#9299a8' : (isWin ? '#089981' : '#f23645');
+                    ctx.beginPath();
+                    ctx.arc(px, py, (i === this.hoverIndex) ? 6 : 3, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    if (i === this.hoverIndex) {{
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                    }}
+                }}
+
+                if (this.hoverIndex >= 0 && this.hoverIndex <= totalTrades) {{
+                    const hPt = this.equityPoints[this.hoverIndex];
+                    const hx = getX(this.hoverIndex);
+                    const hy = getY(hPt.cum_pnl);
+
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([3, 3]);
+                    ctx.beginPath();
+                    ctx.moveTo(padL, hy);
+                    ctx.lineTo(w - padR, hy);
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.moveTo(hx, padT);
+                    ctx.lineTo(hx, h - padB);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }}
+
+                this.layout = {{ mode: 'X_TRADES_Y_PNL', padL, padR, padT, padB, plotW, plotH, dispMin, dispMax, totalTrades, getX, getY }};
+            }}
+        }}
+
+        // 綁定事件監聽器
+        function setupEventListeners() {{
+            // 週期切換按鈕
+            document.querySelectorAll('.tf-btn').forEach(btn => {{
+                btn.addEventListener('click', () => {{
+                    document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    const interval = btn.getAttribute('data-interval');
+                    loadIntervalData(interval);
+                }});
+            }});
+
+            // 交易標記切換開關
+            const toggleMarkersBtn = document.getElementById('toggle-markers-btn');
+            toggleMarkersBtn.addEventListener('click', () => {{
+                showMarkers = !showMarkers;
+                if (showMarkers) {{
+                    toggleMarkersBtn.classList.add('active');
+                    toggleMarkersBtn.innerHTML = '<span>📍 交易標記: 顯示</span>';
+                    const rawBars = KLINE_DATA[currentInterval];
+                    const candleBars = rawBars.map(b => ({{ time: Number(b.time) }}));
+                    applyMarkers(alignMarkersToBars(RAW_MARKERS, candleBars));
+                }} else {{
+                    toggleMarkersBtn.classList.remove('active');
+                    toggleMarkersBtn.innerHTML = '<span>📍 交易標記: 隱藏</span>';
+                    applyMarkers([]);
+                }}
+            }});
+
             // 適配畫面按鈕
             document.getElementById('reset-zoom-btn').addEventListener('click', () => {{
                 if (klineChart) klineChart.timeScale().fitContent();
                 if (perfChart) perfChart.timeScale().fitContent();
+                if (tradeEquityChart) tradeEquityChart.resizeAndDraw();
             }});
 
-            // 頁籤切換：累計損益 vs 交易明細清單 (60筆)
-            if (tabCumPnl && tabTradesTable) {{
-                tabCumPnl.addEventListener('click', () => {{
-                    tabCumPnl.classList.add('active');
-                    tabTradesTable.classList.remove('active');
-                    if (perfChartWrapper) perfChartWrapper.style.display = 'block';
-                    if (tradesTableWrapper) tradesTableWrapper.style.display = 'none';
-                    if (pnlRibbonBar) pnlRibbonBar.style.display = 'flex';
-                    if (perfChart) {{
+            // 翻轉軸向按鈕
+            if (btnFlipAxes) {{
+                btnFlipAxes.addEventListener('click', () => {{
+                    if (tradeEquityChart) {{
+                        const newMode = tradeEquityChart.toggleMode();
+                        btnFlipAxes.textContent = (newMode === 'Y_TRADES_X_PNL') ? '🔄 翻轉軸向 (Y軸交易次數)' : '🔄 翻轉軸向 (X軸交易次數)';
+                    }}
+                }});
+            }}
+
+            // 單筆盈虧條開關
+            if (btnToggleDeltas) {{
+                btnToggleDeltas.addEventListener('click', () => {{
+                    if (tradeEquityChart) {{
+                        const enabled = tradeEquityChart.toggleDeltas();
+                        btnToggleDeltas.textContent = enabled ? '📊 單筆盈虧條: 開' : '📊 單筆盈虧條: 關';
+                    }}
+                }});
+            }}
+
+            // 適配全屏按鈕
+            if (btnFitTradeChart) {{
+                btnFitTradeChart.addEventListener('click', () => {{
+                    if (tradeEquityChart) tradeEquityChart.resizeAndDraw();
+                }});
+            }}
+
+            // 頁籤切換：交易損益淨值圖 (預設) vs 累計損益 (時間軸) vs 交易明細清單
+            function switchTab(activeTab) {{
+                [tabTradeEquity, tabCumPnl, tabTradesTable].forEach(tab => {{
+                    if (tab) tab.classList.remove('active');
+                }});
+                activeTab.classList.add('active');
+
+                if (tradeEquityWrapper) tradeEquityWrapper.style.display = (activeTab === tabTradeEquity) ? 'flex' : 'none';
+                if (perfChartWrapper) perfChartWrapper.style.display = (activeTab === tabCumPnl) ? 'block' : 'none';
+                if (tradesTableWrapper) tradesTableWrapper.style.display = (activeTab === tabTradesTable) ? 'block' : 'none';
+                if (pnlRibbonBar) pnlRibbonBar.style.display = (activeTab === tabTradesTable) ? 'none' : 'flex';
+
+                if (activeTab === tabTradeEquity && tradeEquityChart) {{
+                    setTimeout(() => tradeEquityChart.resizeAndDraw(), 50);
+                }} else if (activeTab === tabCumPnl && perfChart) {{
+                    setTimeout(() => {{
                         perfChart.applyOptions({{
                             width: perfContainer.clientWidth,
                             height: perfContainer.clientHeight
                         }});
-                    }}
-                }});
-
-                tabTradesTable.addEventListener('click', () => {{
-                    tabTradesTable.classList.add('active');
-                    tabCumPnl.classList.remove('active');
-                    if (perfChartWrapper) perfChartWrapper.style.display = 'none';
-                    if (tradesTableWrapper) tradesTableWrapper.style.display = 'block';
-                    if (pnlRibbonBar) pnlRibbonBar.style.display = 'none';
-                }});
+                    }}, 50);
+                }}
             }}
+
+            if (tabTradeEquity) tabTradeEquity.addEventListener('click', () => switchTab(tabTradeEquity));
+            if (tabCumPnl) tabCumPnl.addEventListener('click', () => switchTab(tabCumPnl));
+            if (tabTradesTable) tabTradesTable.addEventListener('click', () => switchTab(tabTradesTable));
 
             // 視窗 Resize 自適應
             window.addEventListener('resize', () => {{
@@ -1458,6 +2176,9 @@ def build_html_content(
                         width: perfContainer.clientWidth,
                         height: perfContainer.clientHeight
                     }});
+                }}
+                if (tradeEquityChart) {{
+                    tradeEquityChart.resizeAndDraw();
                 }}
             }});
         }}
@@ -1519,6 +2240,15 @@ def build_html_content(
             renderKeyMetrics();
             initKlineChart();
             initPerfChart();
+
+            // 初始化固定 Y 軸(交易次數) × X 軸(損益) 圖表
+            if (tradeEquityCanvas && canvasScrollViewport && tradeTooltip) {{
+                tradeEquityChart = new TradeEquityChart(tradeEquityCanvas, canvasScrollViewport, tradeTooltip);
+                setTimeout(() => {{
+                    tradeEquityChart.resizeAndDraw();
+                }}, 100);
+            }}
+
             setupTimeScaleSync();
             setupEventListeners();
             renderTradesTable();
