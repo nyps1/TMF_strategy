@@ -68,6 +68,166 @@ def read_standalone_lightweight_charts() -> str:
     return ""
 
 
+def compute_extended_quant_stats(
+    trades_list: List[Dict[str, Any]],
+    total_net_profit: float,
+    max_drawdown: float
+) -> Dict[str, Any]:
+    """
+    計算進階機構級量化統計指標（期望值、風報比、夏普比率、最大連勝連敗、
+    持倉時間分佈、多空雙向拆解、出場原因歸因、日夜盤時段統計）。
+
+    參數:
+        trades_list (List[Dict[str, Any]]): 序列化後之逐筆交易字典列表。
+        total_net_profit (float): 總淨損益 (TWD)。
+        max_drawdown (float): 最大回撤金額 (TWD)。
+
+    返回:
+        Dict[str, Any]: 進階量化指標與多維度結構分析字典。
+    """
+    import math
+
+    n_trades = len(trades_list)
+    if n_trades == 0:
+        return {
+            "expectancy": 0.0,
+            "expectancyStr": "0",
+            "returnToMdd": 0.0,
+            "returnToMddStr": "0.00",
+            "sharpeRatio": 0.0,
+            "sharpeRatioStr": "0.00",
+            "maxConsecWins": 0,
+            "maxConsecLosses": 0,
+            "streakStr": "0連勝 / 0連敗",
+            "avgHoldMins": 0.0,
+            "avgWinHoldMins": 0.0,
+            "avgLossHoldMins": 0.0,
+            "avgHoldStr": "0 分",
+            "longStats": {"count": 0, "wins": 0, "winRate": 0.0, "netPnl": 0.0, "pf": 0.0},
+            "shortStats": {"count": 0, "wins": 0, "winRate": 0.0, "netPnl": 0.0, "pf": 0.0},
+            "sessionStats": {
+                "day": {"count": 0, "wins": 0, "winRate": 0.0, "netPnl": 0.0},
+                "night": {"count": 0, "wins": 0, "winRate": 0.0, "netPnl": 0.0}
+            },
+            "exitBreakdown": []
+        }
+
+    # 1. 期望值與風報比
+    expectancy = total_net_profit / n_trades
+    exp_sign = "+" if expectancy >= 0 else ""
+    abs_mdd = abs(max_drawdown)
+    ret_to_mdd = (total_net_profit / abs_mdd) if abs_mdd > 0 else 0.0
+
+    # 2. 單筆損益標準差與交易夏普比率 (Annualized Trade Sharpe Proxy)
+    pnls = [t["net_pnl"] for t in trades_list]
+    mean_pnl = sum(pnls) / n_trades
+    variance = sum((x - mean_pnl) ** 2 for x in pnls) / max(1, n_trades - 1)
+    std_pnl = math.sqrt(variance) if variance > 0 else 0.0
+    sharpe = (mean_pnl / std_pnl) * math.sqrt(n_trades) if std_pnl > 0 else 0.0
+
+    # 3. 最大連勝與最大連敗
+    max_w, max_l, cur_w, cur_l = 0, 0, 0, 0
+    for p in pnls:
+        if p > 0:
+            cur_w += 1
+            cur_l = 0
+            if cur_w > max_w:
+                max_w = cur_w
+        elif p < 0:
+            cur_l += 1
+            cur_w = 0
+            if cur_l > max_l:
+                max_l = cur_l
+
+    # 4. 持倉時間統計
+    hold_all = [t.get("hold_mins", 0.0) for t in trades_list]
+    hold_wins = [t.get("hold_mins", 0.0) for t in trades_list if t["net_pnl"] > 0]
+    hold_losses = [t.get("hold_mins", 0.0) for t in trades_list if t["net_pnl"] <= 0]
+    avg_hold = sum(hold_all) / len(hold_all) if hold_all else 0.0
+    avg_win_hold = sum(hold_wins) / len(hold_wins) if hold_wins else 0.0
+    avg_loss_hold = sum(hold_losses) / len(hold_losses) if hold_losses else 0.0
+
+    # 5. 多空雙向拆解
+    def _calc_side(sub_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+        cnt = len(sub_list)
+        if cnt == 0:
+            return {"count": 0, "wins": 0, "winRate": 0.0, "netPnl": 0.0, "pf": 0.0}
+        w_list = [x["net_pnl"] for x in sub_list if x["net_pnl"] > 0]
+        l_list = [x["net_pnl"] for x in sub_list if x["net_pnl"] < 0]
+        gw = sum(w_list)
+        gl = abs(sum(l_list))
+        pf = (gw / gl) if gl > 0 else (99.0 if gw > 0 else 0.0)
+        return {
+            "count": cnt,
+            "wins": len(w_list),
+            "winRate": round((len(w_list) / cnt) * 100.0, 2),
+            "netPnl": round(sum(x["net_pnl"] for x in sub_list), 1),
+            "pf": round(pf, 2)
+        }
+
+    long_trades = [t for t in trades_list if t["side"] == "LONG"]
+    short_trades = [t for t in trades_list if t["side"] == "SHORT"]
+
+    # 6. 日盤 (08:45-13:45) vs 夜盤 (15:00-05:00) 拆解
+    day_trades: List[Dict[str, Any]] = []
+    night_trades: List[Dict[str, Any]] = []
+    for t in trades_list:
+        ts_str = str(t.get("entry_time", ""))
+        hour = 9
+        if len(ts_str) >= 13:
+            try:
+                hour = int(ts_str[11:13])
+            except ValueError:
+                hour = 9
+        if 8 <= hour <= 13:
+            day_trades.append(t)
+        else:
+            night_trades.append(t)
+
+    # 7. 出場原因歸因分析
+    reason_map: Dict[str, List[float]] = {}
+    for t in trades_list:
+        r = t["exit_reason"]
+        reason_map.setdefault(r, []).append(t["net_pnl"])
+
+    exit_breakdown: List[Dict[str, Any]] = []
+    for r_name, r_pnls in reason_map.items():
+        r_cnt = len(r_pnls)
+        r_tot = sum(r_pnls)
+        r_wins = sum(1 for v in r_pnls if v > 0)
+        exit_breakdown.append({
+            "reason": r_name,
+            "count": r_cnt,
+            "ratioPct": round((r_cnt / n_trades) * 100.0, 1),
+            "totalPnl": round(r_tot, 1),
+            "avgPnl": round(r_tot / r_cnt, 1),
+            "winRate": round((r_wins / r_cnt) * 100.0, 1)
+        })
+
+    return {
+        "expectancy": round(expectancy, 1),
+        "expectancyStr": f"{exp_sign}{expectancy:,.0f}",
+        "returnToMdd": round(ret_to_mdd, 2),
+        "returnToMddStr": f"{ret_to_mdd:.2f}",
+        "sharpeRatio": round(sharpe, 2),
+        "sharpeRatioStr": f"{sharpe:.2f}",
+        "maxConsecWins": max_w,
+        "maxConsecLosses": max_l,
+        "streakStr": f"{max_w}連勝 / {max_l}連敗",
+        "avgHoldMins": round(avg_hold, 1),
+        "avgWinHoldMins": round(avg_win_hold, 1),
+        "avgLossHoldMins": round(avg_loss_hold, 1),
+        "avgHoldStr": f"{avg_hold:.0f} 分 ({avg_hold / 5.0:.1f} 根)",
+        "longStats": _calc_side(long_trades),
+        "shortStats": _calc_side(short_trades),
+        "sessionStats": {
+            "day": _calc_side(day_trades),
+            "night": _calc_side(night_trades)
+        },
+        "exitBreakdown": exit_breakdown
+    }
+
+
 def run_single_strategy_backtest(
     df: pd.DataFrame,
     config: BacktestConfig,
@@ -82,7 +242,7 @@ def run_single_strategy_backtest(
         csv_filename (str): 匯出交易明細之 CSV 檔名。
 
     返回:
-        Dict[str, Any]: 包含 metrics, markers, cumulative_pnl, trades, summary 之字典。
+        Dict[str, Any]: 包含 metrics, markers, cumulative_pnl, trades 之字典。
     """
     logger.info(f"正在執行策略回測 [{config.strategy_name} | exit_mode={config.exit_mode}]...")
     engine = BacktestEngine(config=config)
@@ -149,16 +309,22 @@ def run_single_strategy_backtest(
 
     markers.sort(key=lambda m: (m["rawTime"], 0 if m["type"] == "entry" else 1))
 
-    # 2. 建立時間軸累計損益曲線
+    # 2. 建立時間軸累計損益曲線 (含即時回撤計算)
     cumulative_pnl: List[Dict[str, Any]] = []
     initial_cap = config.initial_capital
+    running_peak = initial_cap
     for pt in metrics.equity_curve:
         ts_sec = int(pd.Timestamp(pt["ts"]).timestamp())
-        cum_pnl = round(pt["equity"] - initial_cap, 2)
+        eq_val = round(pt["equity"], 2)
+        if eq_val > running_peak:
+            running_peak = eq_val
+        dd_val = round(eq_val - running_peak, 2)  # 負值或 0，代表水下回撤金額
+        cum_pnl = round(eq_val - initial_cap, 2)
         cumulative_pnl.append({
             "time": ts_sec,
             "value": cum_pnl,
-            "equity": round(pt["equity"], 2),
+            "equity": eq_val,
+            "drawdown": dd_val,
             "close": pt["close"],
             "in_position": pt["in_position"]
         })
@@ -179,6 +345,10 @@ def run_single_strategy_backtest(
         else:
             exit_reason_zh = "結算"
 
+        ent_ts = int(pd.Timestamp(t.entry_time).timestamp())
+        ext_ts = int(pd.Timestamp(t.exit_time).timestamp())
+        hold_mins = max(5.0, round((ext_ts - ent_ts) / 60.0, 1))
+
         trades_list.append({
             "trade_id": t.trade_id,
             "side": t.side.value,
@@ -193,30 +363,37 @@ def run_single_strategy_backtest(
             "cum_pnl": round(running_cum_pnl, 2),
             "return_pct": float(t.return_pct),
             "equity_after": float(t.equity_after),
-            "entry_ts": int(pd.Timestamp(t.entry_time).timestamp()),
-            "exit_ts": int(pd.Timestamp(t.exit_time).timestamp())
+            "entry_ts": ent_ts,
+            "exit_ts": ext_ts,
+            "hold_mins": hold_mins
         })
 
-    # 4. 量化進階指標計算 (贏均、輸均、賺賠比)
+    # 4. 量化進階指標計算 (贏均、輸均、賺賠比 + 深度結構統計)
     wins = [t.net_pnl for t in metrics.trades if t.net_pnl > 0]
     losses = [t.net_pnl for t in metrics.trades if t.net_pnl < 0]
     avg_win = sum(wins) / len(wins) if wins else 0.0
     avg_loss = abs(sum(losses) / len(losses)) if losses else 0.0
     payoff_ratio = (avg_win / avg_loss) if avg_loss > 0 else 0.0
 
+    ext_stats = compute_extended_quant_stats(
+        trades_list=trades_list,
+        total_net_profit=float(metrics.total_net_profit),
+        max_drawdown=float(metrics.max_drawdown)
+    )
+
     net_pnl_sign = "+" if metrics.total_net_profit >= 0 else ""
     return_sign = "+" if metrics.total_return_pct >= 0 else ""
     metrics_dict = {
         "strategyName": config.strategy_name,
         "totalNetProfit": float(metrics.total_net_profit),
-        "totalNetProfitStr": f"{net_pnl_sign}{metrics.total_net_profit:,.2f}",
+        "totalNetProfitStr": f"{net_pnl_sign}{metrics.total_net_profit:,.0f}",
         "totalReturnPct": float(metrics.total_return_pct),
         "totalReturnPctStr": f"{return_sign}{metrics.total_return_pct:.2f}%",
         "isProfit": metrics.total_net_profit >= 0,
         "maxDrawdown": float(metrics.max_drawdown),
-        "maxDrawdownStr": f"{metrics.max_drawdown:,.2f}",
+        "maxDrawdownStr": f"-{abs(metrics.max_drawdown):,.0f}",
         "maxDrawdownPct": float(metrics.max_drawdown_pct),
-        "maxDrawdownPctStr": f"{metrics.max_drawdown_pct:.2f}%",
+        "maxDrawdownPctStr": f"-{abs(metrics.max_drawdown_pct):.2f}%",
         "winRatePct": float(metrics.win_rate_pct),
         "winRateStr": f"{metrics.win_rate_pct:.2f}%",
         "totalTrades": metrics.total_trades,
@@ -228,13 +405,14 @@ def run_single_strategy_backtest(
         "initialCapital": float(metrics.initial_capital),
         "initialCapitalStr": f"{metrics.initial_capital:,.0f}",
         "finalEquity": float(metrics.final_equity),
-        "finalEquityStr": f"{metrics.final_equity:,.2f}",
+        "finalEquityStr": f"{metrics.final_equity:,.0f}",
         "avgWin": float(avg_win),
-        "avgWinStr": f"+{avg_win:,.1f}",
+        "avgWinStr": f"+{avg_win:,.0f}",
         "avgLoss": float(avg_loss),
-        "avgLossStr": f"-{avg_loss:,.1f}",
+        "avgLossStr": f"-{avg_loss:,.0f}",
         "payoffRatio": float(payoff_ratio),
-        "payoffRatioStr": f"{payoff_ratio:.2f}"
+        "payoffRatioStr": f"{payoff_ratio:.2f}",
+        **ext_stats
     }
 
     # 5. 匯出 CSV 交易明細
@@ -248,7 +426,7 @@ def run_single_strategy_backtest(
     logger.info(
         f"策略 [{config.strategy_name}] 回測完成: 交易 {metrics.total_trades} 筆, "
         f"淨利 {metrics.total_net_profit:,.0f} 元, 勝率 {metrics.win_rate_pct:.2f}%, "
-        f"PF {metrics.profit_factor:.3f}, 贏均 {avg_win:,.0f} 元, 賺賠比 {payoff_ratio:.2f}"
+        f"PF {metrics.profit_factor:.3f}, 期望值 {ext_stats['expectancyStr']} 元, 風報比 {ext_stats['returnToMddStr']}"
     )
 
     return {
@@ -396,46 +574,53 @@ def build_html_content(
 
         /* 頂部控制列 */
         .top-toolbar {{
-            height: 48px;
+            height: 46px;
             background-color: #141417;
             border-bottom: 1px solid #232733;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 0 16px;
+            padding: 0 12px;
+            gap: 8px;
             user-select: none;
             z-index: 10;
             flex-shrink: 0;
+            white-space: nowrap;
         }}
         .symbol-badge {{
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
+            white-space: nowrap;
+            flex-shrink: 0;
         }}
         .symbol-badge .symbol-name {{
-            font-size: 15px;
+            font-size: 14px;
             font-weight: 700;
             color: #ffffff;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.3px;
+            white-space: nowrap;
         }}
         .symbol-badge .symbol-code {{
             background: #242735;
             color: #089981;
-            padding: 2px 8px;
+            padding: 2px 6px;
             border-radius: 4px;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 600;
+            white-space: nowrap;
         }}
 
         /* 頂部策略選擇按鈕群組 */
         .strategy-selector-group {{
             display: flex;
             align-items: center;
-            gap: 4px;
+            gap: 3px;
             background: #191b24;
             padding: 2px 4px;
             border-radius: 6px;
             border: 1px solid #282f42;
+            white-space: nowrap;
         }}
         .strat-btn {{
             background: transparent;
@@ -443,13 +628,14 @@ def build_html_content(
             color: #9299a8;
             font-size: 11px;
             font-weight: 600;
-            padding: 3px 8px;
+            padding: 3px 7px;
             border-radius: 4px;
             cursor: pointer;
             display: flex;
             align-items: center;
-            gap: 5px;
+            gap: 4px;
             transition: all 0.15s;
+            white-space: nowrap;
         }}
         .strat-btn:hover {{
             color: #ffffff;
@@ -466,33 +652,37 @@ def build_html_content(
             height: 7px;
             border-radius: 50%;
             display: inline-block;
+            flex-shrink: 0;
         }}
 
         .timeframe-group {{
             display: flex;
             align-items: center;
-            gap: 3px;
+            gap: 2px;
             background: #191b24;
-            padding: 3px;
+            padding: 2px 4px;
             border-radius: 6px;
             border: 1px solid #262a38;
+            white-space: nowrap;
+            flex-shrink: 0;
         }}
         .tf-divider {{
             width: 1px;
-            height: 18px;
+            height: 16px;
             background-color: #33384a;
-            margin: 0 4px;
+            margin: 0 2px;
         }}
         .tf-btn {{
             background: transparent;
             border: none;
             color: #9299a8;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 600;
-            padding: 4px 8px;
+            padding: 3px 6px;
             border-radius: 4px;
             cursor: pointer;
             transition: all 0.15s ease-in-out;
+            white-space: nowrap;
         }}
         .tf-btn:hover {{
             color: #ffffff;
@@ -506,21 +696,24 @@ def build_html_content(
         .actions-group {{
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 5px;
+            white-space: nowrap;
+            flex-shrink: 0;
         }}
         .toggle-btn {{
             background: #1e2230;
             border: 1px solid #2e3448;
             color: #d1d4dc;
-            padding: 4px 10px;
-            font-size: 12px;
+            padding: 4px 8px;
+            font-size: 11px;
             font-weight: 600;
             border-radius: 4px;
             cursor: pointer;
             transition: all 0.15s;
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 4px;
+            white-space: nowrap;
         }}
         .toggle-btn:hover {{
             background: #2a3044;
@@ -540,12 +733,13 @@ def build_html_content(
             background: #1e2230;
             border: 1px solid #2e3448;
             color: #d1d4dc;
-            padding: 4px 10px;
-            font-size: 12px;
+            padding: 4px 8px;
+            font-size: 11px;
             font-weight: 600;
             border-radius: 4px;
             cursor: pointer;
             transition: all 0.15s;
+            white-space: nowrap;
         }}
         .reset-btn:hover {{
             background: #2a3044;
@@ -871,6 +1065,35 @@ def build_html_content(
             font-weight: 700;
         }}
 
+        /* 可拖曳上下分割器 (Resizable Split-Pane Bar) */
+        .split-resizer {{
+            height: 6px;
+            background: #181b24;
+            border-top: 1px solid #252b3b;
+            border-bottom: 1px solid #252b3b;
+            cursor: row-resize;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            z-index: 15;
+            transition: background 0.15s;
+        }}
+        .split-resizer:hover, .split-resizer.dragging {{
+            background: #2962ff;
+            border-color: #2962ff;
+        }}
+        .split-resizer::after {{
+            content: "";
+            width: 36px;
+            height: 2px;
+            background: rgba(255, 255, 255, 0.25);
+            border-radius: 1px;
+        }}
+        .workspace-split.solo-data-mode .split-resizer {{
+            display: none !important;
+        }}
+
         /* 下半部：策略績效全覽面板 (雙圖模式下佔約 48%，全畫面模式佔 100%) */
         .performance-section {{
             flex: 48;
@@ -878,11 +1101,11 @@ def build_html_content(
             flex-direction: column;
             background: #0d0e12;
             width: 100%;
-            min-height: 220px;
+            min-height: 200px;
             position: relative;
         }}
 
-        /* 1. 關鍵數據頂部標題與四欄指標 (Key Metrics Header) */
+        /* 1. 關鍵數據頂部標題與六欄高密度機構指標 (Key Metrics Header) */
         .metrics-card {{
             padding: 8px 18px 6px 18px;
             background: #111318;
@@ -907,16 +1130,41 @@ def build_html_content(
             font-size: 11px;
             color: #00e5ff;
             font-weight: 600;
+            background: rgba(0, 229, 255, 0.1);
+            padding: 2px 8px;
+            border-radius: 4px;
+            border: 1px solid rgba(0, 229, 255, 0.25);
+        }}
+        .shortcut-hint-bar {{
+            font-size: 11px;
+            color: #787b86;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }}
+        .kbd-tag {{
+            background: #1c202e;
+            border: 1px solid #2e354b;
+            color: #a8b0c2;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 10px;
         }}
         .metrics-grid {{
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 16px;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 12px;
         }}
         .metric-col {{
             display: flex;
             flex-direction: column;
             gap: 2px;
+            padding-right: 8px;
+            border-right: 1px solid rgba(255, 255, 255, 0.04);
+        }}
+        .metric-col:last-child {{
+            border-right: none;
         }}
         .metric-label {{
             font-size: 11px;
@@ -929,6 +1177,7 @@ def build_html_content(
             display: flex;
             align-items: baseline;
             gap: 6px;
+            flex-wrap: wrap;
         }}
         .metric-main-value .currency {{
             font-size: 11px;
@@ -949,8 +1198,8 @@ def build_html_content(
             color: #ffffff;
         }}
         .metric-main-value .sub-ratio {{
-            font-size: 12px;
-            color: #d1d4dc;
+            font-size: 11px;
+            color: #9299a8;
             font-weight: 600;
         }}
 
@@ -969,7 +1218,7 @@ def build_html_content(
         .perf-title-group {{
             display: flex;
             align-items: center;
-            gap: 16px;
+            gap: 14px;
         }}
         .perf-title {{
             font-size: 13px;
@@ -982,7 +1231,7 @@ def build_html_content(
         .perf-tab-list {{
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
         }}
         .perf-tab {{
             font-size: 12px;
@@ -1013,7 +1262,7 @@ def build_html_content(
         .perf-tools {{
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
         }}
         .perf-tool-btn {{
             background: #191b24;
@@ -1022,9 +1271,12 @@ def build_html_content(
             cursor: pointer;
             font-size: 11px;
             font-weight: 600;
-            padding: 3px 8px;
+            padding: 3px 9px;
             border-radius: 4px;
             transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 4px;
         }}
         .perf-tool-btn:hover {{
             color: #ffffff;
@@ -1034,6 +1286,16 @@ def build_html_content(
         .perf-tool-btn.highlight {{
             color: #00e5ff;
             border-color: rgba(0, 229, 255, 0.4);
+            background: rgba(0, 229, 255, 0.08);
+        }}
+        .perf-tool-btn.gold-preset {{
+            color: #f0b90b;
+            border-color: rgba(240, 185, 11, 0.45);
+            background: rgba(240, 185, 11, 0.1);
+        }}
+        .perf-tool-btn.gold-preset:hover {{
+            background: rgba(240, 185, 11, 0.22);
+            color: #ffffff;
         }}
 
         /* 3. 分頁 1: ⚔️ 雙策略淨值直觀對比視圖面板 */
@@ -1053,7 +1315,7 @@ def build_html_content(
             display: grid;
             grid-template-columns: repeat(3, 1fr);
             gap: 12px;
-            padding: 10px 18px 8px 18px;
+            padding: 8px 18px 8px 18px;
             background: #12141c;
             border-bottom: 1px solid #1e222e;
             flex-shrink: 0;
@@ -1066,10 +1328,17 @@ def build_html_content(
             display: flex;
             flex-direction: column;
             gap: 6px;
-            transition: transform 0.15s, border-color 0.15s;
+            cursor: pointer;
+            transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+            position: relative;
         }}
         .kpi-card:hover {{
             transform: translateY(-1px);
+            border-color: #3e4866;
+        }}
+        .kpi-card.active-kpi-card {{
+            background: #1b2030;
+            box-shadow: 0 0 14px rgba(0, 229, 255, 0.14);
         }}
         .kpi-card.card-donchian {{
             border-top: 3px solid #00e5ff;
@@ -1102,7 +1371,7 @@ def build_html_content(
         .kpi-card-body {{
             display: grid;
             grid-template-columns: repeat(4, 1fr);
-            gap: 6px;
+            gap: 5px 8px;
         }}
         .kpi-sub-item {{
             display: flex;
@@ -1148,16 +1417,16 @@ def build_html_content(
         /* 多策略懸浮 Tooltip */
         .multi-tooltip {{
             position: absolute;
-            background: rgba(18, 21, 30, 0.95);
+            background: rgba(18, 21, 30, 0.96);
             border: 1px solid #313a52;
             border-radius: 6px;
             padding: 10px 14px;
             pointer-events: none;
             display: none;
             z-index: 50;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.85);
             font-size: 11px;
-            min-width: 250px;
+            min-width: 265px;
             backdrop-filter: blur(6px);
         }}
         .mt-header {{
@@ -1198,9 +1467,9 @@ def build_html_content(
             margin-left: 4px;
         }}
 
-        /* 圖例核取控制方塊 */
+        /* 圖例核取控制方塊與子模式切換 */
         .multi-legend-bar {{
-            height: 28px;
+            height: 30px;
             background: #111318;
             border-bottom: 1px solid #1a1e28;
             display: flex;
@@ -1226,6 +1495,33 @@ def build_html_content(
         .legend-check-item input[type="checkbox"] {{
             cursor: pointer;
             accent-color: #089981;
+        }}
+        .chart-mode-pills {{
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            background: #171a24;
+            padding: 2px;
+            border-radius: 5px;
+            border: 1px solid #262c3e;
+        }}
+        .mode-pill-btn {{
+            background: transparent;
+            border: none;
+            color: #8b949e;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }}
+        .mode-pill-btn:hover {{
+            color: #ffffff;
+        }}
+        .mode-pill-btn.active {{
+            background: #262f45;
+            color: #00e5ff;
         }}
 
         /* 4. 分頁 2: 單策略逐筆淨值圖容器 */
@@ -1376,19 +1672,82 @@ def build_html_content(
             background-color: #f23645;
         }}
 
-        /* 6. 分頁 4: 交易明細清單表格 */
+        /* 6. 分頁 4: 交易明細清單表格 + 互動篩選與匯出工具列 */
         .trades-table-container-wrapper {{
             flex: 1;
             position: relative;
             width: 100%;
             height: 100%;
-            overflow: auto;
+            overflow: hidden;
             background: #0d0e12;
             display: none;
+            flex-direction: column;
+        }}
+        .trades-filter-bar {{
+            height: 36px;
+            background: #12151e;
+            border-bottom: 1px solid #202636;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            flex-shrink: 0;
+            font-size: 11px;
+            gap: 10px;
+        }}
+        .filter-controls-group {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }}
+        .filter-select {{
+            background: #191d2b;
+            border: 1px solid #2b3348;
+            color: #d1d4dc;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 3px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            outline: none;
+        }}
+        .filter-select:hover, .filter-select:focus {{
+            border-color: #00e5ff;
+        }}
+        .filter-summary-badge {{
+            color: #9299a8;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }}
+        .btn-export-csv {{
+            background: rgba(8, 153, 129, 0.16);
+            border: 1px solid rgba(8, 153, 129, 0.45);
+            color: #089981;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }}
+        .btn-export-csv:hover {{
+            background: #089981;
+            color: #ffffff;
+        }}
+        .trades-table-scroll {{
+            flex: 1;
+            overflow: auto;
+            width: 100%;
         }}
         .trades-table {{
             width: 100%;
-            min-width: 1040px;
+            min-width: 1080px;
             border-collapse: collapse;
             font-size: 11px;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -1405,6 +1764,12 @@ def build_html_content(
             border-bottom: 1px solid #232733;
             z-index: 2;
             white-space: nowrap;
+            cursor: pointer;
+            user-select: none;
+        }}
+        .trades-table th:hover {{
+            color: #ffffff;
+            background: #1b202e;
         }}
         .trades-table td {{
             padding: 7px 12px;
@@ -1458,24 +1823,134 @@ def build_html_content(
             border-color: #2962ff;
         }}
 
-        /* 交易特寫聚焦浮動橫幅 */
+        /* 7. 分頁 5: 🔬 深度結構分析面板 (Quant Analytics View) */
+        .quant-analytics-wrapper {{
+            flex: 1;
+            position: relative;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background: #0d0e12;
+            display: none;
+            padding: 14px 18px;
+            gap: 14px;
+            flex-direction: column;
+        }}
+        .analytics-top-grid {{
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 14px;
+            flex-shrink: 0;
+        }}
+        .analytics-card {{
+            background: #141722;
+            border: 1px solid #23293a;
+            border-radius: 8px;
+            padding: 12px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }}
+        .analytics-card-title {{
+            font-size: 12px;
+            font-weight: 700;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #1f2536;
+            padding-bottom: 6px;
+        }}
+        .dual-bar-row {{
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }}
+        .dual-bar-labels {{
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            font-weight: 600;
+        }}
+        .dual-progress-track {{
+            height: 8px;
+            background: #232838;
+            border-radius: 4px;
+            overflow: hidden;
+            display: flex;
+        }}
+        .dual-progress-fill-left {{
+            background: #089981;
+            height: 100%;
+            transition: width 0.3s;
+        }}
+        .dual-progress-fill-right {{
+            background: #f23645;
+            height: 100%;
+            transition: width 0.3s;
+        }}
+        .analytics-stat-table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+        }}
+        .analytics-stat-table th {{
+            color: #787b86;
+            font-weight: 600;
+            text-align: left;
+            padding: 4px 6px;
+            border-bottom: 1px solid #1e2433;
+        }}
+        .analytics-stat-table td {{
+            padding: 5px 6px;
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+            font-weight: 600;
+        }}
+        .analytics-bottom-row {{
+            flex: 1;
+            min-height: 210px;
+            background: #141722;
+            border: 1px solid #23293a;
+            border-radius: 8px;
+            padding: 12px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }}
+        .hist-canvas-box {{
+            flex: 1;
+            position: relative;
+            width: 100%;
+            min-height: 160px;
+        }}
+        #pnl-dist-canvas {{
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }}
+
+        /* 交易特寫聚焦浮動橫幅 (含上/下一筆巡覽器) */
         .trade-focus-banner {{
             position: absolute;
             top: 48px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(20, 24, 36, 0.95);
+            background: rgba(18, 22, 34, 0.96);
             border: 1px solid #2962ff;
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.7);
             border-radius: 6px;
-            padding: 6px 14px;
+            padding: 6px 12px;
             z-index: 25;
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
             font-size: 12px;
             color: #d1d4dc;
             backdrop-filter: blur(8px);
+            white-space: nowrap;
         }}
         .trade-focus-banner .focus-badge {{
             color: #ffffff;
@@ -1483,6 +1958,22 @@ def build_html_content(
             border-radius: 4px;
             font-weight: 700;
             font-size: 11px;
+        }}
+        .btn-nav-trade {{
+            background: #23293d;
+            border: 1px solid #353f5c;
+            color: #00e5ff;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s;
+        }}
+        .btn-nav-trade:hover {{
+            background: #2962ff;
+            border-color: #2962ff;
+            color: #ffffff;
         }}
         .trade-focus-banner .btn-close-focus {{
             background: #2a3042;
@@ -1497,6 +1988,39 @@ def build_html_content(
         .trade-focus-banner .btn-close-focus:hover {{
             background: #f23645;
             border-color: #f23645;
+            color: #ffffff;
+        }}
+
+        /* 預設集快速切換按鈕列 (Modal 內) */
+        .presets-bar {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(240, 185, 11, 0.08);
+            border: 1px solid rgba(240, 185, 11, 0.3);
+            border-radius: 8px;
+            padding: 8px 12px;
+            gap: 8px;
+        }}
+        .preset-btn {{
+            background: #22283a;
+            border: 1px solid #36405c;
+            color: #e1e4ea;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 5px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }}
+        .preset-btn.gold {{
+            background: linear-gradient(135deg, rgba(240, 185, 11, 0.25) 0%, rgba(240, 185, 11, 0.1) 100%);
+            border-color: #f0b90b;
+            color: #f0b90b;
+        }}
+        .preset-btn:hover {{
+            background: #2962ff;
+            border-color: #2962ff;
             color: #ffffff;
         }}
 
@@ -1523,6 +2047,7 @@ def build_html_content(
             cursor: pointer;
             transition: all 0.2s;
             user-select: none;
+            white-space: nowrap;
         }}
         .live-badge.offline {{
             background: rgba(242, 54, 69, 0.12);
@@ -1545,7 +2070,7 @@ def build_html_content(
         /* 即時通知 Toast */
         .toast-container {{
             position: fixed;
-            top: 60px;
+            bottom: 18px;
             right: 20px;
             z-index: 200;
             display: flex;
@@ -1586,17 +2111,17 @@ def build_html_content(
             <span class="symbol-name">微型台指期 10</span>
             <span class="symbol-code">TMFJ6</span>
 
-            <!-- 策略即時切換按鈕群組 -->
+            <!-- 策略即時切換按鈕群組 (快捷鍵 1/2/3) -->
             <div class="strategy-selector-group">
-                <button class="strat-btn active" data-strat="donchian" title="切換為唐奇安通道出場 (N=4)">
+                <button class="strat-btn active" data-strat="donchian" title="切換為唐奇安通道出場 (快捷鍵: 1)">
                     <span class="strat-dot" style="background:#00e5ff;"></span>
                     <span>布林_唐奇安</span>
                 </button>
-                <button class="strat-btn" data-strat="supertrend" title="切換為超級趨勢線出場 (14, 2.0)">
+                <button class="strat-btn" data-strat="supertrend" title="切換為超級趨勢線出場 (快捷鍵: 2)">
                     <span class="strat-dot" style="background:#f0b90b;"></span>
                     <span>布林_超級趨勢</span>
                 </button>
-                <button class="strat-btn" data-strat="atr" title="切換為動態 ATR 停利 (基準對照)">
+                <button class="strat-btn" data-strat="atr" title="切換為動態 ATR 停利 (快捷鍵: 3)">
                     <span class="strat-dot" style="background:#b388ff;"></span>
                     <span>布林_ATR基準</span>
                 </button>
@@ -1622,7 +2147,7 @@ def build_html_content(
 
         <div class="actions-group">
             <!-- 全畫面純數據視圖 ⇄ 雙圖切換按鈕 -->
-            <button class="toggle-btn mode-active" id="btn-toggle-layout" title="切換 全畫面數據視圖 ⇄ K線雙圖模式">
+            <button class="toggle-btn mode-active" id="btn-toggle-layout" title="切換 全畫面數據視圖 ⇄ K線雙圖模式 (快捷鍵: Space)">
                 <span id="txt-toggle-layout">🗖 數據全畫面 (作用中)</span>
             </button>
             <div id="live-status-badge" class="live-badge offline" title="即時行情 WebSocket 串流狀態">
@@ -1632,10 +2157,13 @@ def build_html_content(
             <button class="toggle-btn active" id="toggle-bb-btn" title="切換顯示布林通道上中下軌">
                 <span id="txt-toggle-bb">🎯 布林軌道: 顯示</span>
             </button>
-            <button class="toggle-btn active" id="toggle-markers-btn">
+            <button class="toggle-btn active" id="toggle-exit-line-btn" title="於 K 線圖疊加顯示唐奇安高低軌或超級趨勢線">
+                <span id="txt-toggle-exit-line">🛡️ 出場軌道: 顯示</span>
+            </button>
+            <button class="toggle-btn active" id="toggle-markers-btn" title="切換顯示買進與平倉標記">
                 <span>📍 交易標記: 顯示</span>
             </button>
-            <button class="reset-btn" id="reset-zoom-btn">適配畫面 (Fit)</button>
+            <button class="reset-btn" id="reset-zoom-btn" title="自動適配時間軸與價格縮放">適配畫面 (Fit)</button>
         </div>
     </div>
 
@@ -1661,33 +2189,47 @@ def build_html_content(
                     <span class="legend-label" style="color:#ffb300; margin-left:4px;">中</span><span class="legend-value" id="legend-bb-middle" style="color:#ffb300;">--</span>
                     <span class="legend-label" style="color:#ef5350; margin-left:4px;">下</span><span class="legend-value" id="legend-bb-lower" style="color:#ef5350;">--</span>
                 </div>
+                <div class="legend-item legend-bb-group" id="legend-exit-group">
+                    <span class="legend-label" id="legend-exit-label" style="color:#00e5ff;">出場軌</span>
+                    <span class="legend-value" id="legend-exit-val" style="color:#00e5ff;">--</span>
+                </div>
             </div>
 
-            <!-- 交易特寫聚焦浮動橫幅 -->
+            <!-- 交易特寫聚焦浮動橫幅 (支援上/下一筆逐筆復盤巡覽) -->
             <div id="trade-focus-banner" class="trade-focus-banner" style="display: none;">
+                <button class="btn-nav-trade" onclick="navigateFocusedTrade(-1)" title="上一筆交易 (快捷鍵: [ 或 ←)">◀ 上一筆</button>
                 <div id="trade-focus-content" style="display: flex; align-items: center; gap: 10px;"></div>
-                <button class="btn-close-focus" onclick="clearTradeFocus()">✕ 恢復全景</button>
+                <button class="btn-nav-trade" onclick="navigateFocusedTrade(1)" title="下一筆交易 (快捷鍵: ] 或 →)">下一筆 ▶</button>
+                <button class="btn-close-focus" onclick="clearTradeFocus()" title="關閉特寫並恢復全景 (快捷鍵: Esc)">✕ 恢復全景</button>
             </div>
 
             <div id="kline-container"></div>
-            <div class="watermark">TMF202610 • MULTI-STRATEGY COMPARISON</div>
+            <div class="watermark">TMF202610 • QUANTITATIVE WORKBENCH</div>
         </div>
+
+        <!-- 可拖曳上下分割條 (雙圖模式下可拉動調整 K 線與數據區高度比例) -->
+        <div class="split-resizer" id="split-resizer" title="上下拖曳調整 K 線圖與數據面板高度比例"></div>
 
         <!-- 下半部：策略績效全覽面板 (全畫面模式下佔滿 100% 畫面高) -->
         <div class="performance-section" id="performance-section">
 
-            <!-- 關鍵數據卡片 (隨當前策略切換聯動) -->
+            <!-- 關鍵數據卡片 (隨當前策略切換聯動，擴充為 6 欄機構級指標) -->
             <div class="metrics-card">
                 <div class="metrics-header-row">
                     <div class="metrics-title">
                         <span>關鍵數據全覽</span>
                         <span class="metrics-strat-indicator" id="current-strat-indicator">當前活躍策略: 布林_唐奇安</span>
                     </div>
+                    <div class="shortcut-hint-bar">
+                        <span>快捷鍵: <kbd class="kbd-tag">Space</kbd> 全畫面/雙圖</span>
+                        <span><kbd class="kbd-tag">1</kbd><kbd class="kbd-tag">2</kbd><kbd class="kbd-tag">3</kbd> 切換策略</span>
+                        <span><kbd class="kbd-tag">[</kbd><kbd class="kbd-tag">]</kbd> 逐筆交易復盤</span>
+                    </div>
                 </div>
                 <div class="metrics-grid">
-                    <!-- 總損益 -->
+                    <!-- 1. 總損益 -->
                     <div class="metric-col">
-                        <div class="metric-label">總損益</div>
+                        <div class="metric-label">總淨損益 (Net Profit)</div>
                         <div class="metric-main-value" id="metric-total-pnl">
                             <span id="metric-pnl-val">--</span>
                             <span class="currency">TWD</span>
@@ -1695,123 +2237,143 @@ def build_html_content(
                         </div>
                     </div>
 
-                    <!-- 最大回撤 -->
+                    <!-- 2. 最大回撤 -->
                     <div class="metric-col">
-                        <div class="metric-label">最大回撤</div>
+                        <div class="metric-label">最大回撤 (Max Drawdown)</div>
                         <div class="metric-main-value neutral">
-                            <span id="metric-mdd-val">--</span>
+                            <span id="metric-mdd-val" style="color:#f23645;">--</span>
                             <span class="currency">TWD</span>
-                            <span class="pct" id="metric-mdd-pct" style="color:#d1d4dc;">--</span>
+                            <span class="pct" id="metric-mdd-pct" style="color:#9299a8;">--</span>
                         </div>
                     </div>
 
-                    <!-- 獲利交易與勝率 -->
+                    <!-- 3. 獲利交易與勝率 -->
                     <div class="metric-col">
-                        <div class="metric-label">獲利交易 (勝率)</div>
+                        <div class="metric-label">勝率 (獲利 / 總筆數)</div>
                         <div class="metric-main-value neutral">
                             <span id="metric-win-rate">--</span>
                             <span class="sub-ratio" id="metric-win-ratio">--</span>
                         </div>
                     </div>
 
-                    <!-- 獲利因子與賺賠比 -->
+                    <!-- 4. 獲利因子與賺賠比 -->
                     <div class="metric-col">
                         <div class="metric-label">獲利因子 / 賺賠比</div>
                         <div class="metric-main-value neutral">
-                            <span id="metric-profit-factor">--</span>
+                            <span id="metric-profit-factor" style="color:#00e5ff;">--</span>
                             <span class="sub-ratio" id="metric-payoff-ratio">--</span>
+                        </div>
+                    </div>
+
+                    <!-- 5. 單筆期望值與風報比 -->
+                    <div class="metric-col">
+                        <div class="metric-label">單筆期望值 / 風報比</div>
+                        <div class="metric-main-value neutral">
+                            <span id="metric-expectancy" style="color:#089981;">--</span>
+                            <span class="sub-ratio" id="metric-calmar">--</span>
+                        </div>
+                    </div>
+
+                    <!-- 6. 多空勝率與平均持倉 -->
+                    <div class="metric-col">
+                        <div class="metric-label">多空勝率 / 平均持倉</div>
+                        <div class="metric-main-value neutral">
+                            <span id="metric-ls-winrate" style="font-size:13px;">--</span>
+                            <span class="sub-ratio" id="metric-avg-hold">--</span>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- 績效圖表頂部功能切換列 (四個分頁) -->
+            <!-- 績效圖表頂部功能切換列 (五個分頁) -->
             <div class="perf-header-bar">
                 <div class="perf-title-group">
                     <div class="perf-title">績效分析儀表板</div>
                     <div class="perf-tab-list">
-                        <div class="perf-tab active highlight" id="tab-multi-compare">⚔️ 雙策略淨值直觀對比</div>
+                        <div class="perf-tab active highlight" id="tab-multi-compare">⚔️ 多策略淨值直觀對比</div>
+                        <div class="perf-tab" id="tab-quant-analytics">🔬 深度結構分析</div>
                         <div class="perf-tab" id="tab-trade-equity">📊 單策略逐筆淨值圖</div>
-                        <div class="perf-tab" id="tab-cum-pnl">📈 時間時序走勢 (Time-based)</div>
+                        <div class="perf-tab" id="tab-cum-pnl">📈 時間時序走勢</div>
                         <div class="perf-tab" id="tab-trades-table">📋 交易明細清單</div>
                     </div>
                 </div>
                 <div class="perf-tools">
+                    <button class="perf-tool-btn gold-preset" id="btn-quick-best-preset" title="一鍵套用三張圖最佳化參數組合 (滿倉 3 口模式)">🌟 套用最佳化參數組合</button>
                     <button class="perf-tool-btn highlight" id="btn-open-params-modal" title="微調策略參數並即時重新撮合回測">⚙️ 策略參數調校與即時回測</button>
-                    <button class="perf-tool-btn" id="btn-toggle-compare-mode" title="切換累積損益或帳戶淨值">切換淨值/損益</button>
+                    <button class="perf-tool-btn" id="btn-toggle-compare-mode" title="切換累積損益、帳戶淨值或水下回撤圖">切換視圖模式</button>
                     <button class="perf-tool-btn" id="btn-fit-chart" title="適配全屏">⛶ 適配縮放</button>
                 </div>
             </div>
 
             <!-- 1. 分頁 1: ⚔️ 雙策略淨值直觀對比視圖面板 (預設顯示) -->
             <div class="multi-compare-wrapper" id="multi-compare-wrapper">
-                <!-- 頂部多策略橫向 KPI 矩陣卡片 -->
+                <!-- 頂部多策略橫向 KPI 矩陣卡片 (點擊卡片可直接切換當前活躍策略) -->
                 <div class="multi-kpi-matrix" id="multi-kpi-matrix">
                     <!-- 卡片 1: 唐奇安 -->
-                    <div class="kpi-card card-donchian">
+                    <div class="kpi-card card-donchian active-kpi-card" id="kpi-card-donchian" onclick="switchActiveStrategy('donchian')" title="點擊切換「布林_唐奇安」為當前活躍策略">
                         <div class="kpi-card-header">
                             <div class="kpi-card-title">
                                 <span style="color:#00e5ff;">●</span>
-                                <span>布林_唐奇安 (N=4)</span>
+                                <span id="kpi-title-donchian">布林_唐奇安 (N=4)</span>
                             </div>
                             <span class="kpi-card-badge" style="background:rgba(0,229,255,0.15); color:#00e5ff;">突破極值追蹤</span>
                         </div>
                         <div class="kpi-card-body">
                             <div class="kpi-sub-item"><span class="kpi-sub-label">總淨利</span><span class="kpi-sub-val win" id="kpi-donchian-pnl">+5,878</span></div>
-                            <div class="kpi-sub-item"><span class="kpi-sub-label">勝率</span><span class="kpi-sub-val" id="kpi-donchian-winrate">37.93%</span></div>
+                            <div class="kpi-sub-item"><span class="kpi-sub-label">勝率 (筆數)</span><span class="kpi-sub-val" id="kpi-donchian-winrate">37.93% (58筆)</span></div>
                             <div class="kpi-sub-item"><span class="kpi-sub-label">獲利因子</span><span class="kpi-sub-val" id="kpi-donchian-pf">1.310</span></div>
-                            <div class="kpi-sub-item"><span class="kpi-sub-label">贏單平均</span><span class="kpi-sub-val highlight" id="kpi-donchian-avgwin">+1,137</span></div>
+                            <div class="kpi-sub-item"><span class="kpi-sub-label">單筆期望值</span><span class="kpi-sub-val highlight" id="kpi-donchian-exp">+101</span></div>
                             <div class="kpi-sub-item"><span class="kpi-sub-label">最大回撤</span><span class="kpi-sub-val loss" id="kpi-donchian-mdd">-7,410</span></div>
-                            <div class="kpi-sub-item"><span class="kpi-sub-label">總筆數</span><span class="kpi-sub-val" id="kpi-donchian-trades">58 筆</span></div>
-                            <div class="kpi-sub-item"><span class="kpi-sub-label">輸單平均</span><span class="kpi-sub-val" id="kpi-donchian-avgloss">-532</span></div>
+                            <div class="kpi-sub-item"><span class="kpi-sub-label">風報比 (Ret/MDD)</span><span class="kpi-sub-val" id="kpi-donchian-calmar">0.79</span></div>
+                            <div class="kpi-sub-item"><span class="kpi-sub-label">贏均 / 輸均</span><span class="kpi-sub-val" id="kpi-donchian-avgwl">+1,137 / -532</span></div>
                             <div class="kpi-sub-item"><span class="kpi-sub-label">賺賠比</span><span class="kpi-sub-val highlight" id="kpi-donchian-payoff">2.14</span></div>
                         </div>
                     </div>
 
                     <!-- 卡片 2: 超級趨勢 -->
-                    <div class="kpi-card card-supertrend">
+                    <div class="kpi-card card-supertrend" id="kpi-card-supertrend" onclick="switchActiveStrategy('supertrend')" title="點擊切換「布林_超級趨勢」為當前活躍策略">
                         <div class="kpi-card-header">
                             <div class="kpi-card-title">
                                 <span style="color:#f0b90b;">●</span>
-                                <span>布林_超級趨勢 (14, 2.0)</span>
+                                <span id="kpi-title-supertrend">布林_超級趨勢 (14, 2.0)</span>
                             </div>
                             <span class="kpi-card-badge" style="background:rgba(240,185,11,0.15); color:#f0b90b;">單向不可逆軌道</span>
                         </div>
                         <div class="kpi-card-body">
                             <div class="kpi-sub-item"><span class="kpi-sub-label">總淨利</span><span class="kpi-sub-val win" id="kpi-supertrend-pnl">+3,916</span></div>
-                            <div class="kpi-sub-item"><span class="kpi-sub-label">勝率</span><span class="kpi-sub-val" id="kpi-supertrend-winrate">36.36%</span></div>
+                            <div class="kpi-sub-item"><span class="kpi-sub-label">勝率 (筆數)</span><span class="kpi-sub-val" id="kpi-supertrend-winrate">36.36% (55筆)</span></div>
                             <div class="kpi-sub-item"><span class="kpi-sub-label">獲利因子</span><span class="kpi-sub-val" id="kpi-supertrend-pf">1.200</span></div>
-                            <div class="kpi-sub-item"><span class="kpi-sub-label">贏單平均</span><span class="kpi-sub-val highlight" id="kpi-supertrend-avgwin">+1,160</span></div>
+                            <div class="kpi-sub-item"><span class="kpi-sub-label">單筆期望值</span><span class="kpi-sub-val highlight" id="kpi-supertrend-exp">+71</span></div>
                             <div class="kpi-sub-item"><span class="kpi-sub-label">最大回撤</span><span class="kpi-sub-val loss" id="kpi-supertrend-mdd">-9,274</span></div>
-                            <div class="kpi-sub-item"><span class="kpi-sub-label">總筆數</span><span class="kpi-sub-val" id="kpi-supertrend-trades">55 筆</span></div>
-                            <div class="kpi-sub-item"><span class="kpi-sub-label">輸單平均</span><span class="kpi-sub-val" id="kpi-supertrend-avgloss">-551</span></div>
+                            <div class="kpi-sub-item"><span class="kpi-sub-label">風報比 (Ret/MDD)</span><span class="kpi-sub-val" id="kpi-supertrend-calmar">0.42</span></div>
+                            <div class="kpi-sub-item"><span class="kpi-sub-label">贏均 / 輸均</span><span class="kpi-sub-val" id="kpi-supertrend-avgwl">+1,160 / -551</span></div>
                             <div class="kpi-sub-item"><span class="kpi-sub-label">賺賠比</span><span class="kpi-sub-val highlight" id="kpi-supertrend-payoff">2.11</span></div>
                         </div>
                     </div>
 
                     <!-- 卡片 3: ATR 基準 -->
-                    <div class="kpi-card card-atr">
+                    <div class="kpi-card card-atr" id="kpi-card-atr" onclick="switchActiveStrategy('atr')" title="點擊切換「布林_ATR基準」為當前活躍策略">
                         <div class="kpi-card-header">
                             <div class="kpi-card-title">
                                 <span style="color:#b388ff;">●</span>
-                                <span>布林_ATR基準 (14, 5)</span>
+                                <span id="kpi-title-atr">布林_ATR基準 (14, 5)</span>
                             </div>
-                            <span class="kpi-card-badge" style="background:rgba(179,136,255,0.15); color:#b388ff;">動態均線停利 (對照)</span>
+                            <span class="kpi-card-badge" style="background:rgba(179,136,255,0.15); color:#b388ff;">👑 綜合績效領先</span>
                         </div>
                         <div class="kpi-card-body">
                             <div class="kpi-sub-item"><span class="kpi-sub-label">總淨利</span><span class="kpi-sub-val win" id="kpi-atr-pnl">+13,838</span></div>
-                            <div class="kpi-sub-item"><span class="kpi-sub-label">勝率</span><span class="kpi-sub-val" id="kpi-atr-winrate">48.48%</span></div>
+                            <div class="kpi-sub-item"><span class="kpi-sub-label">勝率 (筆數)</span><span class="kpi-sub-val" id="kpi-atr-winrate">48.48% (66筆)</span></div>
                             <div class="kpi-sub-item"><span class="kpi-sub-label">獲利因子</span><span class="kpi-sub-val" id="kpi-atr-pf">2.090</span></div>
-                            <div class="kpi-sub-item"><span class="kpi-sub-label">贏單平均</span><span class="kpi-sub-val" id="kpi-atr-avgwin">+829</span></div>
+                            <div class="kpi-sub-item"><span class="kpi-sub-label">單筆期望值</span><span class="kpi-sub-val highlight" id="kpi-atr-exp">+210</span></div>
                             <div class="kpi-sub-item"><span class="kpi-sub-label">最大回撤</span><span class="kpi-sub-val loss" id="kpi-atr-mdd">-2,980</span></div>
-                            <div class="kpi-sub-item"><span class="kpi-sub-label">總筆數</span><span class="kpi-sub-val" id="kpi-atr-trades">66 筆</span></div>
-                            <div class="kpi-sub-item"><span class="kpi-sub-label">輸單平均</span><span class="kpi-sub-val" id="kpi-atr-avgloss">-373</span></div>
+                            <div class="kpi-sub-item"><span class="kpi-sub-label">風報比 (Ret/MDD)</span><span class="kpi-sub-val" id="kpi-atr-calmar">4.64</span></div>
+                            <div class="kpi-sub-item"><span class="kpi-sub-label">贏均 / 輸均</span><span class="kpi-sub-val" id="kpi-atr-avgwl">+829 / -373</span></div>
                             <div class="kpi-sub-item"><span class="kpi-sub-label">賺賠比</span><span class="kpi-sub-val" id="kpi-atr-payoff">2.22</span></div>
                         </div>
                     </div>
                 </div>
 
-                <!-- 圖例控制方塊 -->
+                <!-- 圖例控制方塊與子模式切換 -->
                 <div class="multi-legend-bar">
                     <div class="legend-checkbox-group">
                         <label class="legend-check-item" style="color:#00e5ff;">
@@ -1827,8 +2389,15 @@ def build_html_content(
                             <span>ATR 基準 (紫色)</span>
                         </label>
                     </div>
+
+                    <div class="chart-mode-pills">
+                        <button class="mode-pill-btn active" data-cmode="PNL" onclick="setMultiChartMode('PNL')">📈 累積損益 (TWD)</button>
+                        <button class="mode-pill-btn" data-cmode="EQUITY" onclick="setMultiChartMode('EQUITY')">💰 帳戶總淨值</button>
+                        <button class="mode-pill-btn" data-cmode="DRAWDOWN" onclick="setMultiChartMode('DRAWDOWN')">🌊 水下回撤曲線 (Drawdown)</button>
+                    </div>
+
                     <div style="color:#787b86;">
-                        <span id="txt-axis-hint">💡 坐標軸向：橫軸 X = 時間時序推進 ｜ 縱軸 Y = 累積損益 (TWD)，滑鼠 Hover 查看即時對比數值</span>
+                        <span id="txt-axis-hint">💡 橫軸 X = 時間時序推進 ｜ 縱軸 Y = 累積損益 (TWD)，點擊上方策略卡片可切換主圖活躍策略</span>
                     </div>
                 </div>
 
@@ -1839,7 +2408,98 @@ def build_html_content(
                 </div>
             </div>
 
-            <!-- 2. 分頁 2: 單策略逐筆淨值圖 (固定Y軸次數 × X軸損益) -->
+            <!-- 2. 分頁 2: 🔬 深度結構分析面板 (多空拆解 / 出場歸因 / 日夜盤 / 損益分佈直方圖) -->
+            <div class="quant-analytics-wrapper" id="quant-analytics-wrapper">
+                <div class="analytics-top-grid">
+                    <!-- 卡片 A: 多空雙向績效對決 -->
+                    <div class="analytics-card">
+                        <div class="analytics-card-title">
+                            <span>⚖️ 多空雙向績效拆解 (Long vs Short)</span>
+                            <span id="qa-strat-badge" style="color:#00e5ff; font-size:11px;">布林_唐奇安</span>
+                        </div>
+                        <div class="dual-bar-row">
+                            <div class="dual-bar-labels">
+                                <span style="color:#089981;" id="qa-long-ratio-txt">做多 (LONG): --</span>
+                                <span style="color:#f23645;" id="qa-short-ratio-txt">放空 (SHORT): --</span>
+                            </div>
+                            <div class="dual-progress-track">
+                                <div class="dual-progress-fill-left" id="qa-long-bar" style="width:50%;"></div>
+                                <div class="dual-progress-fill-right" id="qa-short-bar" style="width:50%;"></div>
+                            </div>
+                        </div>
+                        <table class="analytics-stat-table">
+                            <thead>
+                                <tr>
+                                    <th>方向</th>
+                                    <th>成交筆數</th>
+                                    <th>勝率</th>
+                                    <th>獲利因子</th>
+                                    <th>累積淨損益</th>
+                                </tr>
+                            </thead>
+                            <tbody id="qa-ls-tbody"></tbody>
+                        </table>
+                    </div>
+
+                    <!-- 卡片 B: 出場原因歸因分析 -->
+                    <div class="analytics-card">
+                        <div class="analytics-card-title">
+                            <span>🛡️ 出場機制歸因分析 (Exit Attribution)</span>
+                            <span style="color:#8b949e; font-size:10px;">停利 vs 停損貢獻度</span>
+                        </div>
+                        <table class="analytics-stat-table">
+                            <thead>
+                                <tr>
+                                    <th>出場原因</th>
+                                    <th>筆數 (佔比)</th>
+                                    <th>勝率</th>
+                                    <th>平均單筆</th>
+                                    <th>總損益貢獻</th>
+                                </tr>
+                            </thead>
+                            <tbody id="qa-exit-tbody"></tbody>
+                        </table>
+                    </div>
+
+                    <!-- 卡片 C: 日夜盤時段與持倉時間分析 -->
+                    <div class="analytics-card">
+                        <div class="analytics-card-title">
+                            <span>⏱️ 日夜盤時段與持倉時間結構</span>
+                            <span id="qa-streak-badge" style="color:#f0b90b; font-size:11px;">--</span>
+                        </div>
+                        <table class="analytics-stat-table">
+                            <thead>
+                                <tr>
+                                    <th>交易時段</th>
+                                    <th>成交筆數</th>
+                                    <th>時段勝率</th>
+                                    <th>獲利因子</th>
+                                    <th>時段累積淨利</th>
+                                </tr>
+                            </thead>
+                            <tbody id="qa-session-tbody"></tbody>
+                        </table>
+                        <div style="margin-top:auto; padding-top:6px; border-top:1px dashed #23293a; display:flex; justify-content:space-between; font-size:11px; color:#9299a8;">
+                            <span>贏單平均持倉: <b id="qa-win-hold" style="color:#089981;">--</b></span>
+                            <span>輸單平均持倉: <b id="qa-loss-hold" style="color:#f23645;">--</b></span>
+                            <span>夏普指標: <b id="qa-sharpe" style="color:#00e5ff;">--</b></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 底部單筆損益分佈直方圖 -->
+                <div class="analytics-bottom-row">
+                    <div class="analytics-card-title" style="border-bottom:none; padding-bottom:0;">
+                        <span>📊 單筆交易損益分佈直方圖 (PnL Distribution Histogram — 檢驗右偏肥尾效應)</span>
+                        <span style="font-size:11px; color:#8b949e;">左側紅色為虧損區間筆數，右側綠色為獲利區間筆數</span>
+                    </div>
+                    <div class="hist-canvas-box" id="hist-canvas-box">
+                        <canvas id="pnl-dist-canvas"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. 分頁 3: 單策略逐筆淨值圖 (固定Y軸次數 × X軸損益) -->
             <div class="trade-equity-container-wrapper" id="trade-equity-wrapper">
                 <div class="trade-chart-header-info">
                     <span class="info-tag mode-tag" id="current-mode-tag">當前視圖: 縱軸 Y = 交易次數 ｜ 橫軸 X = 累積損益 (TWD) & 帳戶淨值</span>
@@ -1851,7 +2511,7 @@ def build_html_content(
                 <div class="trade-tooltip" id="trade-tooltip"></div>
             </div>
 
-            <!-- 3. 分頁 3: 時間軸累計損益圖表容器 (BaselineSeries) -->
+            <!-- 4. 分頁 4: 時間軸累計損益圖表容器 (BaselineSeries) -->
             <div class="perf-chart-container-wrapper" id="perf-chart-wrapper">
                 <div class="perf-legend" id="perf-legend">
                     <span style="color:#787b86;">累計損益:</span>
@@ -1862,28 +2522,63 @@ def build_html_content(
                 <div id="perf-chart-container"></div>
             </div>
 
-            <!-- 4. 分頁 4: 交易明細清單表格 -->
+            <!-- 5. 分頁 5: 交易明細清單表格 (含多維度篩選、排序與一鍵 CSV 匯出) -->
             <div class="trades-table-container-wrapper" id="trades-table-wrapper">
-                <table class="trades-table">
-                    <thead>
-                        <tr>
-                            <th>編號</th>
-                            <th>方向</th>
-                            <th>進場時間</th>
-                            <th>進場價格</th>
-                            <th>出場時間</th>
-                            <th>出場價格</th>
-                            <th>口數</th>
-                            <th>出場原因</th>
-                            <th>手續費+稅</th>
-                            <th>淨損益 (TWD)</th>
-                            <th>帳戶總淨值</th>
-                            <th>圖表定位</th>
-                        </tr>
-                    </thead>
-                    <tbody id="trades-table-body">
-                    </tbody>
-                </table>
+                <div class="trades-filter-bar">
+                    <div class="filter-controls-group">
+                        <span style="color:#8b949e; font-weight:600;">🔍 篩選條件:</span>
+                        <select class="filter-select" id="filter-trade-side" onchange="renderTradesTable()">
+                            <option value="ALL">全部方向 (多 + 空)</option>
+                            <option value="LONG">僅做多 (LONG)</option>
+                            <option value="SHORT">僅放空 (SHORT)</option>
+                        </select>
+                        <select class="filter-select" id="filter-trade-result" onchange="renderTradesTable()">
+                            <option value="ALL">全部結果 (獲利 + 虧損)</option>
+                            <option value="WIN">僅獲利單 (WIN &gt; 0)</option>
+                            <option value="LOSS">僅虧損單 (LOSS &le; 0)</option>
+                        </select>
+                        <select class="filter-select" id="filter-trade-reason" onchange="renderTradesTable()">
+                            <option value="ALL">全部出場原因</option>
+                            <option value="PROFIT_EXIT">動態停利出場 (唐奇安/超級趨勢/ATR)</option>
+                            <option value="STOP_LOSS">初始停損出場 (停損)</option>
+                        </select>
+                        <span style="color:#8b949e; font-weight:600; margin-left:6px;">⇅ 排序:</span>
+                        <select class="filter-select" id="sort-trade-by" onchange="renderTradesTable()">
+                            <option value="ID_ASC">依交易編號 (由舊至新)</option>
+                            <option value="ID_DESC">依交易編號 (由新至舊)</option>
+                            <option value="PNL_DESC">依單筆淨損益 (最高獲利優先)</option>
+                            <option value="PNL_ASC">依單筆淨損益 (最大虧損優先)</option>
+                            <option value="HOLD_DESC">依持倉時間 (最長優先)</option>
+                        </select>
+                    </div>
+                    <div class="filter-controls-group">
+                        <div class="filter-summary-badge" id="trades-filter-summary">顯示 0 筆</div>
+                        <button class="btn-export-csv" onclick="exportActiveTradesCsv()" title="將目前篩選之交易明細匯出為 Excel 相容之 UTF-8 CSV 檔案">📥 匯出當前明細 CSV</button>
+                    </div>
+                </div>
+                <div class="trades-table-scroll">
+                    <table class="trades-table">
+                        <thead>
+                            <tr>
+                                <th>編號</th>
+                                <th>方向</th>
+                                <th>進場時間</th>
+                                <th>進場價格</th>
+                                <th>出場時間</th>
+                                <th>出場價格</th>
+                                <th>持倉時間</th>
+                                <th>口數</th>
+                                <th>出場原因</th>
+                                <th>手續費+稅</th>
+                                <th>淨損益 (TWD)</th>
+                                <th>帳戶總淨值</th>
+                                <th>圖表定位</th>
+                            </tr>
+                        </thead>
+                        <tbody id="trades-table-body">
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             <!-- 底部盈虧狀態區段彩條 -->
@@ -1897,12 +2592,21 @@ def build_html_content(
         <div class="params-modal-card">
             <div class="params-modal-header">
                 <div class="params-modal-title">
-                    <span>⚙️ 策略參數調校與即時回測</span>
-                    <span style="font-size:11px; font-weight:normal; color:#8b949e;">(0毫秒極速撮合 3,947 根 K 棒，即時刷新淨值與布林軌道)</span>
+                    <span>⚙️ 策略參數調校與即時回測工作台</span>
+                    <span style="font-size:11px; font-weight:normal; color:#8b949e;">(極速撮合 3,947 根 K 棒，即時刷新全視圖、軌道與結構分析)</span>
                 </div>
-                <button class="params-modal-close" id="btn-close-params-modal" title="關閉視窗">✕</button>
+                <button class="params-modal-close" id="btn-close-params-modal" title="關閉視窗 (Esc)">✕</button>
             </div>
             <div class="params-modal-body">
+                <!-- 快速參數預設集橫幅 -->
+                <div class="presets-bar">
+                    <span style="font-size:12px; font-weight:700; color:#f0b90b;">✨ 快速參數配置集 (Presets)：</span>
+                    <div style="display:flex; gap:8px;">
+                        <button class="preset-btn gold" id="btn-apply-best-preset" title="套用三張圖最佳化參數 (ATR +43,202 / 唐奇安 +20,839 / 超級趨勢 +17,193)">🌟 套用三張圖最佳化參數 (滿倉 3 口)</button>
+                        <button class="preset-btn" id="btn-apply-baseline-preset" title="恢復原始固定 1 口基準參數">🔄 恢復原始單口基準 (1 口)</button>
+                    </div>
+                </div>
+
                 <!-- 策略選擇標籤 -->
                 <div class="params-strat-selector">
                     <div class="params-strat-tab active" data-strat="donchian">布林_唐奇安 (突破極值追蹤)</div>
@@ -1910,7 +2614,7 @@ def build_html_content(
                     <div class="params-strat-tab" data-strat="atr">布林_ATR基準 (動態均線對照)</div>
                 </div>
 
-                <!-- 區塊一：進場條件 (布林動能突破 + 1/4 拉回確認) -->
+                <!-- 區塊一：進場條件 (布林動能突破 + 拉回確認) -->
                 <div class="params-section">
                     <div class="params-section-title">
                         <span>🎯 進場型態條件 (布林通道突破與拉回濾網)</span>
@@ -1939,11 +2643,24 @@ def build_html_content(
                         <div class="param-item">
                             <div class="param-label-row">
                                 <span>拉回確認比例 (Pullback Ratio)</span>
-                                <span class="param-val-badge" id="val-badge-pullback">0.25 (1/4 K棒)</span>
+                                <span class="param-val-badge" id="val-badge-pullback">0.25 (25% K棒)</span>
                             </div>
                             <div class="param-input-row">
                                 <input type="range" class="param-range" id="range-pullback" min="0.10" max="0.50" step="0.05" value="0.25">
                                 <input type="number" class="param-num-input" id="num-pullback" min="0.10" max="0.50" step="0.05" value="0.25">
+                            </div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label-row">
+                                <span>部位控管模式 (Position Sizing)</span>
+                                <span class="param-val-badge" id="val-badge-sizing">預設槓桿風控</span>
+                            </div>
+                            <div class="param-input-row">
+                                <select class="filter-select" id="sel-sizing-mode" style="width:100%; padding:5px 8px;">
+                                    <option value="notional">名目合約槓桿風控模式 (預設基準)</option>
+                                    <option value="margin">保證金成數滿倉模式 (Margin Mode, 期初 3 口)</option>
+                                    <option value="fixed_one_lot">固定單口模式 (Fixed 1 Lot)</option>
+                                </select>
                             </div>
                         </div>
                     </div>
@@ -2078,10 +2795,10 @@ def build_html_content(
             </div>
             <div class="params-modal-footer">
                 <div class="params-actions">
-                    <button class="btn-reset-params" id="btn-reset-params">🔄 重設為初始預設值</button>
+                    <button class="btn-reset-params" id="btn-reset-params">🔄 重設當前策略</button>
                 </div>
                 <div class="params-actions">
-                    <button class="btn-run-backtest" id="btn-run-backtest">⚡ 立即執行回測 (Run Dynamic Backtest)</button>
+                    <button class="btn-run-backtest" id="btn-run-backtest">⚡ 立即回測當前策略 (Run Active)</button>
                 </div>
             </div>
         </div>
@@ -2096,6 +2813,7 @@ def build_html_content(
         let currentStrategyKey = 'donchian'; // 預設顯示唐奇安通道策略
         let showMarkers = true;
         let isSoloDataMode = true; // 預設全畫面數據模式
+        let currentFocusedTradeId = null; // 當前聚焦特寫之 Trade ID
 
         // 圖表物件
         let klineChart = null;
@@ -2114,6 +2832,12 @@ def build_html_content(
         }};
         window.bbLookupMap = new Map();
 
+        // 出場軌道線 (唐奇安上下軌 / 超級趨勢線)
+        let exitLinePrimarySeries = null;
+        let exitLineSecondarySeries = null;
+        let showExitOverlay = true;
+        window.exitLookupMap = new Map();
+
         let perfChart = null;
         let baselineSeries = null;
         let isSyncingRange = false;
@@ -2127,8 +2851,10 @@ def build_html_content(
         const tradesTableWrapper = document.getElementById('trades-table-wrapper');
         const tradeEquityWrapper = document.getElementById('trade-equity-wrapper');
         const multiCompareWrapper = document.getElementById('multi-compare-wrapper');
+        const quantAnalyticsWrapper = document.getElementById('quant-analytics-wrapper');
 
         const tabMultiCompare = document.getElementById('tab-multi-compare');
+        const tabQuantAnalytics = document.getElementById('tab-quant-analytics');
         const tabTradeEquity = document.getElementById('tab-trade-equity');
         const tabCumPnl = document.getElementById('tab-cum-pnl');
         const tabTradesTable = document.getElementById('tab-trades-table');
@@ -2159,6 +2885,8 @@ def build_html_content(
         const legendBbGroup = document.getElementById('legend-bb-group');
         const btnToggleBb = document.getElementById('toggle-bb-btn');
         const txtToggleBb = document.getElementById('txt-toggle-bb');
+        const btnToggleExitLine = document.getElementById('toggle-exit-line-btn');
+        const txtToggleExitLine = document.getElementById('txt-toggle-exit-line');
 
         const paramsModalOverlay = document.getElementById('params-modal-overlay');
         const btnOpenParamsModal = document.getElementById('btn-open-params-modal');
@@ -2172,13 +2900,14 @@ def build_html_content(
 
         let tradeEquityChart = null;
         let multiCompareChart = null;
+        window.currentFilteredTrades = [];
 
         // 取得當前活躍策略之完整資料物件
         function getActiveStrategy() {{
             return STRATEGIES_DATA[currentStrategyKey] || STRATEGIES_DATA['donchian'];
         }}
 
-        // 渲染關鍵數據面板數值 (與當前活躍策略聯動)
+        // 渲染關鍵數據面板數值 (與當前活躍策略聯動，支援 6 欄機構級指標)
         function renderKeyMetrics() {{
             const strat = getActiveStrategy();
             const m = strat.metrics;
@@ -2197,6 +2926,27 @@ def build_html_content(
             document.getElementById('metric-profit-factor').textContent = m.profitFactorStr;
             document.getElementById('metric-payoff-ratio').textContent = `賺賠比 ${{m.payoffRatioStr}}`;
 
+            // 第 5 欄：單筆期望值與風報比
+            const expEl = document.getElementById('metric-expectancy');
+            const calmarEl = document.getElementById('metric-calmar');
+            if (expEl) {{
+                expEl.textContent = `${{m.expectancyStr || '+0'}} TWD`;
+                expEl.style.color = (m.expectancy || 0) >= 0 ? '#089981' : '#f23645';
+            }}
+            if (calmarEl) {{
+                calmarEl.textContent = `風報比 ${{m.returnToMddStr || '0.00'}} ｜ 夏普 ${{m.sharpeRatioStr || '0.00'}}`;
+            }}
+
+            // 第 6 欄：多空勝率與平均持倉
+            const lsWinEl = document.getElementById('metric-ls-winrate');
+            const avgHoldEl = document.getElementById('metric-avg-hold');
+            if (lsWinEl && m.longStats && m.shortStats) {{
+                lsWinEl.innerHTML = `<span style="color:#089981;">多 ${{m.longStats.winRate}}%</span> <span style="color:#555e70;">/</span> <span style="color:#f23645;">空 ${{m.shortStats.winRate}}%</span>`;
+            }}
+            if (avgHoldEl) {{
+                avgHoldEl.textContent = `均持倉 ${{m.avgHoldStr || '--'}}`;
+            }}
+
             if (currentStratIndicator) {{
                 currentStratIndicator.textContent = `當前活躍策略: ${{strat.displayName}}`;
                 currentStratIndicator.style.color = strat.themeColor;
@@ -2206,6 +2956,12 @@ def build_html_content(
                 legendStratTag.style.color = strat.themeColor;
                 legendStratTag.style.borderColor = strat.themeColor;
             }}
+
+            // 高亮當前選中之多策略 KPI 卡片
+            ['donchian', 'supertrend', 'atr'].forEach(k => {{
+                const card = document.getElementById(`kpi-card-${{k}}`);
+                if (card) card.classList.toggle('active-kpi-card', k === currentStrategyKey);
+            }});
         }}
 
         // 初始化主 K 線圖
@@ -2293,7 +3049,7 @@ def build_html_content(
                 }});
             }}
 
-            // 建立布林通道上中下軌線條
+            // 建立布林通道上中下軌線條與動態出場軌道線條
             if (typeof klineChart.addSeries === 'function' && window.LightweightCharts && window.LightweightCharts.LineSeries) {{
                 bbUpperSeries = klineChart.addSeries(window.LightweightCharts.LineSeries, {{
                     color: '#26a69a',
@@ -2319,6 +3075,22 @@ def build_html_content(
                     lastValueVisible: true,
                     title: 'BB 下軌'
                 }});
+                exitLinePrimarySeries = klineChart.addSeries(window.LightweightCharts.LineSeries, {{
+                    color: '#00e5ff',
+                    lineWidth: 1.5,
+                    lineStyle: 2,
+                    priceLineVisible: false,
+                    lastValueVisible: true,
+                    title: '出場軌'
+                }});
+                exitLineSecondarySeries = klineChart.addSeries(window.LightweightCharts.LineSeries, {{
+                    color: '#00e5ff',
+                    lineWidth: 1.5,
+                    lineStyle: 2,
+                    priceLineVisible: false,
+                    lastValueVisible: true,
+                    title: 'DC下軌'
+                }});
             }} else if (typeof klineChart.addLineSeries === 'function') {{
                 bbUpperSeries = klineChart.addLineSeries({{
                     color: '#26a69a',
@@ -2343,6 +3115,22 @@ def build_html_content(
                     priceLineVisible: false,
                     lastValueVisible: true,
                     title: 'BB 下軌'
+                }});
+                exitLinePrimarySeries = klineChart.addLineSeries({{
+                    color: '#00e5ff',
+                    lineWidth: 1.5,
+                    lineStyle: 2,
+                    priceLineVisible: false,
+                    lastValueVisible: true,
+                    title: '出場軌'
+                }});
+                exitLineSecondarySeries = klineChart.addLineSeries({{
+                    color: '#00e5ff',
+                    lineWidth: 1.5,
+                    lineStyle: 2,
+                    priceLineVisible: false,
+                    lastValueVisible: true,
+                    title: 'DC下軌'
                 }});
             }}
 
@@ -2630,7 +3418,131 @@ def build_html_content(
             }}
         }}
 
-        // 更新左上角 K 線數據 (包含布林軌道數值)
+        // 更新 K 線主圖上的動態出場軌道線 (唐奇安上下軌 / 超級趨勢線 / ATR 數值)
+        function updateExitOverlay(bars) {{
+            if (!bars || bars.length === 0) return;
+            const n = bars.length;
+            const highs = bars.map(b => Number(b.high));
+            const lows = bars.map(b => Number(b.low));
+            const closes = bars.map(b => Number(b.close));
+            const times = bars.map(b => Number(b.time));
+            const lookup = new Map();
+
+            const cfg = (typeof strategyConfigs !== 'undefined' && strategyConfigs[currentStrategyKey])
+                ? strategyConfigs[currentStrategyKey]
+                : {{ donchian_length: 4, supertrend_length: 14, supertrend_multiplier: 2.0, atr_length: 14, atr_sig_length: 5 }};
+
+            if (currentStrategyKey === 'donchian') {{
+                const dLen = Number(cfg.donchian_length) || 4;
+                const highSeriesData = [];
+                const lowSeriesData = [];
+                for (let i = dLen; i < n; i++) {{
+                    let maxH = -Infinity;
+                    let minL = Infinity;
+                    for (let j = i - dLen; j < i; j++) {{
+                        if (highs[j] > maxH) maxH = highs[j];
+                        if (lows[j] < minL) minL = lows[j];
+                    }}
+                    const t = times[i];
+                    highSeriesData.push({{ time: t, value: Number(maxH.toFixed(1)) }});
+                    lowSeriesData.push({{ time: t, value: Number(minL.toFixed(1)) }});
+                    lookup.set(t, {{
+                        label: `DC(${{dLen}})`,
+                        text: `${{maxH.toFixed(0)}} / ${{minL.toFixed(0)}}`,
+                        color: '#00e5ff'
+                    }});
+                }}
+                window.exitLookupMap = lookup;
+                if (exitLinePrimarySeries && exitLineSecondarySeries) {{
+                    exitLinePrimarySeries.applyOptions({{ color: '#00e5ff', lineStyle: 2, lineWidth: 1.5, title: `DC上(${{dLen}})` }});
+                    exitLineSecondarySeries.applyOptions({{ color: '#00e5ff', lineStyle: 2, lineWidth: 1.5, title: `DC下(${{dLen}})` }});
+                    if (showExitOverlay) {{
+                        exitLinePrimarySeries.setData(highSeriesData);
+                        exitLineSecondarySeries.setData(lowSeriesData);
+                    }} else {{
+                        exitLinePrimarySeries.setData([]);
+                        exitLineSecondarySeries.setData([]);
+                    }}
+                }}
+            }} else if (currentStrategyKey === 'supertrend') {{
+                const stLen = Number(cfg.supertrend_length) || 14;
+                const stMult = Number(cfg.supertrend_multiplier) || 2.0;
+                const tr = new Array(n).fill(0);
+                tr[0] = highs[0] - lows[0];
+                for (let i = 1; i < n; i++) {{
+                    tr[i] = Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i - 1]), Math.abs(lows[i] - closes[i - 1]));
+                }}
+                const atrArr = calculateWilderRma(tr, 14);
+                const stSeriesData = [];
+                let prevUpper = 0, prevLower = 0, dir = 1;
+                for (let i = 1; i < n; i++) {{
+                    if (isNaN(atrArr[i]) || atrArr[i] <= 0) continue;
+                    const med = (highs[i] + lows[i]) / 2.0;
+                    const bUp = med + stMult * atrArr[i];
+                    const bLow = med - stMult * atrArr[i];
+                    const fUp = (i === 1 || bUp < prevUpper || closes[i - 1] > prevUpper) ? bUp : prevUpper;
+                    const fLow = (i === 1 || bLow > prevLower || closes[i - 1] < prevLower) ? bLow : prevLower;
+                    let curSt;
+                    if (dir === 1) {{
+                        if (closes[i] < fLow) {{ dir = -1; curSt = fUp; }}
+                        else curSt = fLow;
+                    }} else {{
+                        if (closes[i] > fUp) {{ dir = 1; curSt = fLow; }}
+                        else curSt = fUp;
+                    }}
+                    prevUpper = fUp;
+                    prevLower = fLow;
+                    const t = times[i];
+                    stSeriesData.push({{ time: t, value: Number(curSt.toFixed(1)) }});
+                    lookup.set(t, {{
+                        label: `ST(${{stLen}},${{stMult}})`,
+                        text: `${{curSt.toFixed(1)}} (${{dir === 1 ? '多' : '空'}})`,
+                        color: dir === 1 ? '#089981' : '#f23645'
+                    }});
+                }}
+                window.exitLookupMap = lookup;
+                if (exitLinePrimarySeries && exitLineSecondarySeries) {{
+                    exitLinePrimarySeries.applyOptions({{ color: '#f0b90b', lineStyle: 0, lineWidth: 2, title: '超級趨勢線' }});
+                    exitLineSecondarySeries.setData([]);
+                    if (showExitOverlay) {{
+                        exitLinePrimarySeries.setData(stSeriesData);
+                    }} else {{
+                        exitLinePrimarySeries.setData([]);
+                    }}
+                }}
+            }} else {{
+                // ATR 基準：計算 ATR 與 ATR Signal 供左上角圖例顯示
+                const atrLen = Number(cfg.atr_length) || 14;
+                const sigLen = Number(cfg.atr_sig_length) || 5;
+                const tr = new Array(n).fill(0);
+                tr[0] = highs[0] - lows[0];
+                for (let i = 1; i < n; i++) {{
+                    tr[i] = Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i - 1]), Math.abs(lows[i] - closes[i - 1]));
+                }}
+                const atrArr = calculateWilderRma(tr, atrLen);
+                for (let i = sigLen - 1; i < n; i++) {{
+                    let sum = 0, cnt = 0;
+                    for (let j = i - sigLen + 1; j <= i; j++) {{
+                        if (!isNaN(atrArr[j])) {{ sum += atrArr[j]; cnt++; }}
+                    }}
+                    if (cnt === sigLen && !isNaN(atrArr[i])) {{
+                        const sigVal = sum / sigLen;
+                        lookup.set(times[i], {{
+                            label: `ATR(${{atrLen}},${{sigLen}})`,
+                            text: `${{atrArr[i].toFixed(1)}} / 均 ${{sigVal.toFixed(1)}}`,
+                            color: '#b388ff'
+                        }});
+                    }}
+                }}
+                window.exitLookupMap = lookup;
+                if (exitLinePrimarySeries && exitLineSecondarySeries) {{
+                    exitLinePrimarySeries.setData([]);
+                    exitLineSecondarySeries.setData([]);
+                }}
+            }}
+        }}
+
+        // 更新左上角 K 線數據 (包含布林軌道與出場軌道數值)
         function updateLegend(bar, volume, timestamp) {{
             const dtStr = bar.datetime || (bar.time ? new Date(bar.time * 1000).toLocaleString('zh-TW', {{ hour12: false }}) : '');
             legendTime.textContent = dtStr;
@@ -2647,9 +3559,9 @@ def build_html_content(
 
             legendVolume.textContent = Number(volume || bar.volume || 0).toLocaleString('zh-TW');
 
+            const ts = Number(timestamp || bar.time);
             // 更新布林數值
             if (legendBbUpper && legendBbMiddle && legendBbLower) {{
-                const ts = Number(timestamp || bar.time);
                 if (window.bbLookupMap && window.bbLookupMap.has(ts)) {{
                     const bbVal = window.bbLookupMap.get(ts);
                     legendBbUpper.textContent = bbVal.upper.toFixed(1);
@@ -2659,6 +3571,22 @@ def build_html_content(
                     legendBbUpper.textContent = '--';
                     legendBbMiddle.textContent = '--';
                     legendBbLower.textContent = '--';
+                }}
+            }}
+
+            // 更新出場軌道數值
+            const exitLabelEl = document.getElementById('legend-exit-label');
+            const exitValEl = document.getElementById('legend-exit-val');
+            if (exitLabelEl && exitValEl) {{
+                if (window.exitLookupMap && window.exitLookupMap.has(ts)) {{
+                    const ex = window.exitLookupMap.get(ts);
+                    exitLabelEl.textContent = ex.label;
+                    exitLabelEl.style.color = ex.color;
+                    exitValEl.textContent = ex.text;
+                    exitValEl.style.color = ex.color;
+                }} else {{
+                    exitLabelEl.textContent = '出場軌';
+                    exitValEl.textContent = '--';
                 }}
             }}
         }}
@@ -2722,8 +3650,9 @@ def build_html_content(
             candlestickSeries.setData(cData);
             volumeSeries.setData(vData);
 
-            // 更新布林通道三軌
+            // 更新布林通道三軌與出場軌道線
             updateBollingerBands(rawBars);
+            updateExitOverlay(rawBars);
 
             if (showMarkers) {{
                 const strat = getActiveStrategy();
@@ -2741,6 +3670,7 @@ def build_html_content(
         // 定位特定交易之時間範圍並放大特寫
         function focusTradeOnChart(entryTs, exitTs, tradeId) {{
             if (!entryTs || !exitTs) return;
+            currentFocusedTradeId = tradeId;
 
             // 1. 若處於全畫面模式，點擊定位時自動切換回雙圖模式以便觀察，且避免 fitContent 覆蓋
             let layoutSwitched = false;
@@ -2762,24 +3692,18 @@ def build_html_content(
                 net_pnl: 0
             }};
 
-            // 3. 高亮表格當前行
+            // 3. 高亮表格當前行並平滑捲動該行進入視野
             document.querySelectorAll('#trades-table-body tr').forEach(r => r.classList.remove('selected-trade-row'));
             const targetRow = document.getElementById(`trade-row-${{tradeId}}`);
             if (targetRow) {{
                 targetRow.classList.add('selected-trade-row');
+                try {{ targetRow.scrollIntoView({{ behavior: 'smooth', block: 'nearest' }}); }} catch (e) {{}}
             }}
 
-            // 4. 平滑滾動至 K 線主圖
-            const klineSectionEl = document.getElementById('kline-section');
-            if (klineSectionEl) {{
-                klineSectionEl.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
-            }}
-
-            // 5. 延遲 120ms (等待 DOM 展開與寬度計算完成後) 精確縮放可視區間
+            // 4. 延遲 (等待 DOM 展開與寬度計算完成後) 精確縮放可視區間
             const delayMs = layoutSwitched ? 150 : 30;
             setTimeout(() => {{
                 if (!klineChart) return;
-                // 計算前後各約 1.5 ~ 2 小時 (約 18 ~ 24 根 5 分 K) 之特寫緩衝
                 const duration = Math.max(0, exitTs - entryTs);
                 const padSec = Math.max(3600 * 1.5, Math.min(3600 * 4, duration * 1.5));
                 const fromSec = entryTs - padSec;
@@ -2791,13 +3715,34 @@ def build_html_content(
                     console.warn('定位時間範圍失敗:', e);
                 }}
 
-                // 6. 顯示頂部交易特寫橫幅 Banner
+                // 5. 顯示頂部交易特寫橫幅 Banner
                 showTradeFocusBanner(trade);
             }}, delayMs);
         }}
 
+        // 逐筆復盤巡覽器：跳轉上一筆 (-1) 或下一筆 (+1) 交易
+        function navigateFocusedTrade(delta) {{
+            const strat = getActiveStrategy();
+            const list = (window.currentFilteredTrades && window.currentFilteredTrades.length > 0)
+                ? window.currentFilteredTrades
+                : (strat.trades || []);
+            if (list.length === 0) return;
+
+            let idx = list.findIndex(t => t.trade_id === currentFocusedTradeId);
+            if (idx === -1) {{
+                idx = delta > 0 ? 0 : list.length - 1;
+            }} else {{
+                idx = (idx + delta + list.length) % list.length;
+            }}
+            const target = list[idx];
+            if (target) {{
+                focusTradeOnChart(target.entry_ts, target.exit_ts, target.trade_id);
+            }}
+        }}
+
         // 清除交易聚焦狀態並恢復全景
         function clearTradeFocus() {{
+            currentFocusedTradeId = null;
             const banner = document.getElementById('trade-focus-banner');
             if (banner) banner.style.display = 'none';
             document.querySelectorAll('#trades-table-body tr').forEach(r => r.classList.remove('selected-trade-row'));
@@ -2813,41 +3758,89 @@ def build_html_content(
             const content = document.getElementById('trade-focus-content');
             if (!banner || !content) return;
 
+            const strat = getActiveStrategy();
+            const totalCount = (strat.trades || []).length;
             const isLong = trade.side === 'LONG';
             const isProfit = (trade.net_pnl || 0) >= 0;
             const pnlSign = isProfit ? '+' : '';
             const pnlColor = isProfit ? '#089981' : '#f23645';
             const sideColor = isLong ? '#089981' : '#f23645';
             const sideText = isLong ? '買進做多' : '放空賣出';
+            const holdMins = Math.round(trade.hold_mins || ((trade.exit_ts - trade.entry_ts) / 60) || 0);
 
             content.innerHTML = `
-                <span class="focus-badge" style="background:${{sideColor}};">#${{trade.trade_id}} ${{sideText}}</span>
+                <span class="focus-badge" style="background:${{sideColor}};">#${{trade.trade_id}} / ${{totalCount}} ${{sideText}} (${{trade.qty || 1}}口)</span>
                 <span>進場: <b>${{trade.entry_time}}</b> @ <b>${{Number(trade.entry_price).toFixed(1)}}</b></span>
                 <span style="color:#787b86;">➔</span>
-                <span>出場: <b>${{trade.exit_time}}</b> @ <b>${{Number(trade.exit_price).toFixed(1)}}</b> (${{trade.exit_reason}})</span>
+                <span>出場: <b>${{trade.exit_time}}</b> @ <b>${{Number(trade.exit_price).toFixed(1)}}</b> (${{trade.exit_reason}} ｜ ${{holdMins}}分)</span>
                 <span>損益: <b style="color:${{pnlColor}}; font-size:13px;">${{pnlSign}}${{Number(trade.net_pnl).toLocaleString('zh-TW', {{minimumFractionDigits: 1}})}} TWD</b></span>
             `;
             banner.style.display = 'flex';
         }}
 
-        // 渲染交易明細表格
+        // 渲染交易明細表格 (支援方向/結果/原因篩選與多欄位排序)
         function renderTradesTable() {{
             const tbody = document.getElementById('trades-table-body');
             if (!tbody) return;
             tbody.innerHTML = '';
 
             const strat = getActiveStrategy();
-            const trades = strat.trades;
+            const rawTrades = strat.trades || [];
 
-            trades.forEach(t => {{
+            const sideFilter = (document.getElementById('filter-trade-side') || {{}}).value || 'ALL';
+            const resFilter = (document.getElementById('filter-trade-result') || {{}}).value || 'ALL';
+            const reasonFilter = (document.getElementById('filter-trade-reason') || {{}}).value || 'ALL';
+            const sortBy = (document.getElementById('sort-trade-by') || {{}}).value || 'ID_ASC';
+
+            let filtered = rawTrades.filter(t => {{
+                if (sideFilter !== 'ALL' && t.side !== sideFilter) return false;
+                if (resFilter === 'WIN' && t.net_pnl <= 0) return false;
+                if (resFilter === 'LOSS' && t.net_pnl > 0) return false;
+                if (reasonFilter === 'STOP_LOSS' && t.exit_reason !== '停損') return false;
+                if (reasonFilter === 'PROFIT_EXIT' && t.exit_reason === '停損') return false;
+                return true;
+            }});
+
+            filtered.sort((a, b) => {{
+                const holdA = a.hold_mins !== undefined ? a.hold_mins : ((a.exit_ts - a.entry_ts) / 60);
+                const holdB = b.hold_mins !== undefined ? b.hold_mins : ((b.exit_ts - b.entry_ts) / 60);
+                if (sortBy === 'ID_DESC') return b.trade_id - a.trade_id;
+                if (sortBy === 'PNL_DESC') return b.net_pnl - a.net_pnl;
+                if (sortBy === 'PNL_ASC') return a.net_pnl - b.net_pnl;
+                if (sortBy === 'HOLD_DESC') return holdB - holdA;
+                return a.trade_id - b.trade_id;
+            }});
+
+            window.currentFilteredTrades = filtered;
+
+            // 更新篩選摘要統計
+            const summaryEl = document.getElementById('trades-filter-summary');
+            if (summaryEl) {{
+                const fWins = filtered.filter(t => t.net_pnl > 0).length;
+                const fWinRate = filtered.length > 0 ? ((fWins / filtered.length) * 100).toFixed(1) : '0.0';
+                const fSum = filtered.reduce((acc, t) => acc + t.net_pnl, 0);
+                const fSign = fSum >= 0 ? '+' : '';
+                const fColor = fSum >= 0 ? '#089981' : '#f23645';
+                summaryEl.innerHTML = `
+                    <span>顯示 <b>${{filtered.length}}</b> / ${{rawTrades.length}} 筆</span>
+                    <span>｜</span>
+                    <span>篩選勝率: <b style="color:#ffffff;">${{fWinRate}}%</b></span>
+                    <span>｜</span>
+                    <span>篩選小計: <b style="color:${{fColor}};">${{fSign}}${{Math.round(fSum).toLocaleString('zh-TW')}} TWD</b></span>
+                `;
+            }}
+
+            filtered.forEach(t => {{
                 const tr = document.createElement('tr');
                 tr.id = `trade-row-${{t.trade_id}}`;
+                if (currentFocusedTradeId === t.trade_id) tr.classList.add('selected-trade-row');
                 const isLong = t.side === 'LONG';
                 const isProfit = t.net_pnl >= 0;
                 const pnlSign = isProfit ? '+' : '';
                 const pnlClass = isProfit ? 'pnl-positive' : 'pnl-negative';
                 const badgeClass = isLong ? 'badge-side-long' : 'badge-side-short';
                 const sideText = isLong ? '做多' : '放空';
+                const holdMins = Math.round(t.hold_mins !== undefined ? t.hold_mins : ((t.exit_ts - t.entry_ts) / 60));
 
                 tr.innerHTML = `
                     <td>#${{t.trade_id}}</td>
@@ -2856,6 +3849,7 @@ def build_html_content(
                     <td style="font-weight:600;">${{t.entry_price.toFixed(1)}}</td>
                     <td>${{t.exit_time}}</td>
                     <td style="font-weight:600;">${{t.exit_price.toFixed(1)}}</td>
+                    <td style="color:#9299a8;">${{holdMins}} 分</td>
                     <td>${{t.qty}}口</td>
                     <td><span style="color:#d1d4dc; font-weight:600;">${{t.exit_reason}}</span></td>
                     <td style="color:#787b86;">${{t.costs.toFixed(0)}}</td>
@@ -2868,10 +3862,254 @@ def build_html_content(
             }});
         }}
 
+        // 匯出當前篩選之交易明細為 UTF-8 BOM CSV
+        function exportActiveTradesCsv() {{
+            const strat = getActiveStrategy();
+            const rows = window.currentFilteredTrades || strat.trades || [];
+            if (rows.length === 0) {{
+                showToast('目前無符合條件之交易紀錄可供匯出', 'danger');
+                return;
+            }}
+            const headers = ['交易編號', '策略名稱', '方向', '進場時間', '進場價格', '出場時間', '出場價格', '持倉時間(分)', '口數', '出場原因', '交易成本(TWD)', '單筆淨損益(TWD)', '累積損益(TWD)', '帳戶總淨值(TWD)'];
+            const csvLines = [headers.join(',')];
+            rows.forEach(t => {{
+                const holdMins = Math.round(t.hold_mins !== undefined ? t.hold_mins : ((t.exit_ts - t.entry_ts) / 60));
+                const line = [
+                    t.trade_id,
+                    `"${{strat.displayName}}"`,
+                    t.side === 'LONG' ? '做多(LONG)' : '放空(SHORT)',
+                    `"${{t.entry_time}}"`,
+                    t.entry_price.toFixed(1),
+                    `"${{t.exit_time}}"`,
+                    t.exit_price.toFixed(1),
+                    holdMins,
+                    t.qty,
+                    `"${{t.exit_reason}}"`,
+                    t.costs.toFixed(0),
+                    t.net_pnl.toFixed(1),
+                    t.cum_pnl.toFixed(1),
+                    t.equity_after.toFixed(1)
+                ];
+                csvLines.push(line.join(','));
+            }});
+
+            const blob = new Blob(['\\uFEFF' + csvLines.join('\\n')], {{ type: 'text/csv;charset=utf-8;' }});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `trades_${{currentStrategyKey}}_${{rows.length}}筆.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showToast(`📥 已成功匯出 ${{rows.length}} 筆交易明細 CSV！`, 'success');
+        }}
+
+        // 渲染分頁 2：「🔬 深度結構分析」面板與單筆損益分佈直方圖
+        function renderQuantAnalytics() {{
+            const strat = getActiveStrategy();
+            const m = strat.metrics;
+            if (!m) return;
+
+            const badge = document.getElementById('qa-strat-badge');
+            if (badge) {{
+                badge.textContent = strat.displayName;
+                badge.style.color = strat.themeColor;
+            }}
+
+            // 1. 多空雙向拆解
+            const ls = m.longStats || {{ count: 0, wins: 0, winRate: 0, netPnl: 0, pf: 0 }};
+            const ss = m.shortStats || {{ count: 0, wins: 0, winRate: 0, netPnl: 0, pf: 0 }};
+            const totalCnt = Math.max(1, ls.count + ss.count);
+            const longPct = Math.round((ls.count / totalCnt) * 100);
+            const shortPct = 100 - longPct;
+
+            const lTxt = document.getElementById('qa-long-ratio-txt');
+            const sTxt = document.getElementById('qa-short-ratio-txt');
+            const lBar = document.getElementById('qa-long-bar');
+            const sBar = document.getElementById('qa-short-bar');
+            if (lTxt) lTxt.textContent = `做多 (LONG): ${{ls.count}} 筆 (${{longPct}}%)`;
+            if (sTxt) sTxt.textContent = `放空 (SHORT): ${{ss.count}} 筆 (${{shortPct}}%)`;
+            if (lBar) lBar.style.width = `${{longPct}}%`;
+            if (sBar) sBar.style.width = `${{shortPct}}%`;
+
+            const lsTbody = document.getElementById('qa-ls-tbody');
+            if (lsTbody) {{
+                const fmtPnl = (v) => `${{v >= 0 ? '+' : ''}}${{Math.round(v).toLocaleString('zh-TW')}} TWD`;
+                lsTbody.innerHTML = `
+                    <tr>
+                        <td><span class="badge-side-long">做多 LONG</span></td>
+                        <td>${{ls.count}} 筆 (${{ls.wins}} 勝)</td>
+                        <td>${{ls.winRate}}%</td>
+                        <td style="color:#00e5ff;">${{Number(ls.pf).toFixed(2)}}</td>
+                        <td class="${{ls.netPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}}">${{fmtPnl(ls.netPnl)}}</td>
+                    </tr>
+                    <tr>
+                        <td><span class="badge-side-short">放空 SHORT</span></td>
+                        <td>${{ss.count}} 筆 (${{ss.wins}} 勝)</td>
+                        <td>${{ss.winRate}}%</td>
+                        <td style="color:#00e5ff;">${{Number(ss.pf).toFixed(2)}}</td>
+                        <td class="${{ss.netPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}}">${{fmtPnl(ss.netPnl)}}</td>
+                    </tr>
+                    <tr style="border-top:1px solid #2b3348;">
+                        <td style="color:#9299a8;">全向合計</td>
+                        <td>${{m.totalTrades}} 筆 (${{m.winningTrades}} 勝)</td>
+                        <td>${{m.winRateStr}}</td>
+                        <td style="color:#00e5ff;">${{m.profitFactorStr}}</td>
+                        <td class="${{m.isProfit ? 'pnl-positive' : 'pnl-negative'}}">${{m.totalNetProfitStr}} TWD</td>
+                    </tr>
+                `;
+            }}
+
+            // 2. 出場原因歸因表
+            const exitTbody = document.getElementById('qa-exit-tbody');
+            if (exitTbody && m.exitBreakdown) {{
+                exitTbody.innerHTML = m.exitBreakdown.map(eb => {{
+                    const sign = eb.totalPnl >= 0 ? '+' : '';
+                    const avgSign = eb.avgPnl >= 0 ? '+' : '';
+                    const cls = eb.totalPnl >= 0 ? 'pnl-positive' : 'pnl-negative';
+                    return `
+                        <tr>
+                            <td style="color:#ffffff;">${{eb.reason}}</td>
+                            <td>${{eb.count}} 筆 (${{eb.ratioPct}}%)</td>
+                            <td>${{eb.winRate}}%</td>
+                            <td class="${{eb.avgPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}}">${{avgSign}}${{Math.round(eb.avgPnl).toLocaleString('zh-TW')}}</td>
+                            <td class="${{cls}}">${{sign}}${{Math.round(eb.totalPnl).toLocaleString('zh-TW')}} TWD</td>
+                        </tr>
+                    `;
+                }}).join('');
+            }}
+
+            // 3. 日夜盤時段與持倉結構
+            const sessTbody = document.getElementById('qa-session-tbody');
+            if (sessTbody && m.sessionStats) {{
+                const d = m.sessionStats.day || {{ count: 0, wins: 0, winRate: 0, netPnl: 0, pf: 0 }};
+                const n = m.sessionStats.night || {{ count: 0, wins: 0, winRate: 0, netPnl: 0, pf: 0 }};
+                const fmtPnl = (v) => `${{v >= 0 ? '+' : ''}}${{Math.round(v).toLocaleString('zh-TW')}} TWD`;
+                sessTbody.innerHTML = `
+                    <tr>
+                        <td style="color:#ffb300;">☀️ 日盤 (08:45-13:45)</td>
+                        <td>${{d.count}} 筆 (${{d.wins}} 勝)</td>
+                        <td>${{d.winRate}}%</td>
+                        <td style="color:#00e5ff;">${{Number(d.pf || 0).toFixed(2)}}</td>
+                        <td class="${{d.netPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}}">${{fmtPnl(d.netPnl)}}</td>
+                    </tr>
+                    <tr>
+                        <td style="color:#b388ff;">🌙 夜盤 (15:00-05:00)</td>
+                        <td>${{n.count}} 筆 (${{n.wins}} 勝)</td>
+                        <td>${{n.winRate}}%</td>
+                        <td style="color:#00e5ff;">${{Number(n.pf || 0).toFixed(2)}}</td>
+                        <td class="${{n.netPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}}">${{fmtPnl(n.netPnl)}}</td>
+                    </tr>
+                `;
+            }}
+
+            const streakEl = document.getElementById('qa-streak-badge');
+            const winHoldEl = document.getElementById('qa-win-hold');
+            const lossHoldEl = document.getElementById('qa-loss-hold');
+            const sharpeEl = document.getElementById('qa-sharpe');
+            if (streakEl) streakEl.textContent = `極端紀錄: ${{m.streakStr || '--'}}`;
+            if (winHoldEl) winHoldEl.textContent = `${{m.avgWinHoldMins || 0}} 分鐘`;
+            if (lossHoldEl) lossHoldEl.textContent = `${{m.avgLossHoldMins || 0}} 分鐘`;
+            if (sharpeEl) sharpeEl.textContent = m.sharpeRatioStr || '0.00';
+
+            drawPnlHistogram();
+        }}
+
+        // 繪製單筆交易損益分佈直方圖 (PnL Distribution Histogram)
+        function drawPnlHistogram() {{
+            const canvas = document.getElementById('pnl-dist-canvas');
+            const box = document.getElementById('hist-canvas-box');
+            if (!canvas || !box) return;
+            const rect = box.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) return;
+
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = Math.floor(rect.width * dpr);
+            canvas.height = Math.floor(rect.height * dpr);
+            canvas.style.width = rect.width + 'px';
+            canvas.style.height = rect.height + 'px';
+
+            const ctx = canvas.getContext('2d');
+            ctx.resetTransform();
+            ctx.scale(dpr, dpr);
+
+            const w = rect.width;
+            const h = rect.height;
+            ctx.clearRect(0, 0, w, h);
+
+            const strat = getActiveStrategy();
+            const trades = strat.trades || [];
+            if (trades.length === 0) return;
+
+            const pnls = trades.map(t => Number(t.net_pnl));
+            const minPnl = Math.min(...pnls, -1000);
+            const maxPnl = Math.max(...pnls, 1500);
+            const binCount = 12;
+            const step = (maxPnl - minPnl) / binCount || 1;
+
+            const bins = new Array(binCount).fill(0).map((_, i) => ({{
+                low: minPnl + i * step,
+                high: minPnl + (i + 1) * step,
+                mid: minPnl + (i + 0.5) * step,
+                count: 0
+            }}));
+
+            pnls.forEach(p => {{
+                let idx = Math.floor((p - minPnl) / step);
+                if (idx >= binCount) idx = binCount - 1;
+                if (idx < 0) idx = 0;
+                bins[idx].count++;
+            }});
+
+            const maxCount = Math.max(...bins.map(b => b.count), 1);
+            const padTop = 22, padBottom = 28, padLeft = 36, padRight = 24;
+            const chartW = w - padLeft - padRight;
+            const chartH = h - padTop - padBottom;
+            const barSlotW = chartW / binCount;
+            const barW = Math.max(12, barSlotW * 0.72);
+
+            // 背景水平網格線
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+            ctx.lineWidth = 1;
+            for (let g = 0; g <= 4; g++) {{
+                const gy = padTop + (chartH / 4) * g;
+                ctx.beginPath();
+                ctx.moveTo(padLeft, gy);
+                ctx.lineTo(padLeft + chartW, gy);
+                ctx.stroke();
+            }}
+
+            // 繪製直方柱
+            ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+            ctx.textAlign = 'center';
+            bins.forEach((b, i) => {{
+                const cx = padLeft + (i + 0.5) * barSlotW;
+                const bh = (b.count / maxCount) * chartH;
+                const bx = cx - barW / 2;
+                const by = padTop + chartH - bh;
+                const isPos = b.mid >= 0;
+
+                ctx.fillStyle = isPos ? 'rgba(8, 153, 129, 0.78)' : 'rgba(242, 54, 69, 0.78)';
+                ctx.strokeStyle = isPos ? '#089981' : '#f23645';
+                ctx.lineWidth = 1.2;
+                if (b.count > 0) {{
+                    ctx.fillRect(bx, by, barW, bh);
+                    ctx.strokeRect(bx, by, barW, bh);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillText(`${{b.count}}筆`, cx, by - 5);
+                }}
+
+                // X 軸損益區間標籤
+                const lbl = `${{b.mid >= 0 ? '+' : ''}}${{Math.round(b.mid)}}`;
+                ctx.fillStyle = isPos ? '#26a69a' : '#ef5350';
+                ctx.fillText(lbl, cx, padTop + chartH + 16);
+            }});
+        }}
+
         // ==============================================================
         // 核心一：同屏多策略淨值對比繪圖引擎 (MultiStrategyCompareChart)
-        // 經典標準走勢軸向：橫軸 X = 時間時序推進 ｜ 縱軸 Y = 累積損益 / 淨值 (TWD)
-        // 具備 0 軸水平基準虛線、底部日期時間刻度與右側損益刻度
+        // 支援三種模式：'PNL' (累積損益) ｜ 'EQUITY' (帳戶總淨值) ｜ 'DRAWDOWN' (水下回撤曲線)
         // ==============================================================
         class MultiStrategyCompareChart {{
             constructor(canvas, viewport, tooltip) {{
@@ -2880,8 +4118,8 @@ def build_html_content(
                 this.tooltip = tooltip;
                 this.ctx = canvas.getContext('2d');
 
-                this.mode = 'PNL'; // 'PNL' (相對累積損益) 或 'EQUITY' (總淨值)
-                this.axisMode = 'X_TIME_Y_PNL'; // 永久固定唯一：橫軸 X = 時間推進，縱軸 Y = 累積損益
+                this.mode = 'PNL'; // 'PNL' (累積損益), 'EQUITY' (帳戶總淨值), 'DRAWDOWN' (水下回撤曲線)
+                this.axisMode = 'X_TIME_Y_PNL';
                 this.visibleSeries = {{
                     donchian: true,
                     supertrend: true,
@@ -2894,17 +4132,15 @@ def build_html_content(
             }}
 
             initData() {{
-                // 彙總全時序之時間戳集合 (以 5m 為基準)
                 const bars5m = KLINE_DATA['5m'] || [];
                 this.timePoints = bars5m.map(b => ({{
                     time: Number(b.time),
                     datetime: b.datetime
                 }}));
 
-                // 建立快速查詢索引 (各策略時間 -> 數值)
                 this.seriesData = {{}};
                 const keys = ['donchian', 'supertrend', 'atr'];
-                
+
                 keys.forEach(k => {{
                     const strat = STRATEGIES_DATA[k];
                     const map = new Map();
@@ -2916,12 +4152,11 @@ def build_html_content(
                     this.seriesData[k] = map;
                 }});
 
-                // 預先對齊各時間點之三策略數值 (Forward-fill 平滑對齊)
                 this.alignedPoints = [];
                 let lastVals = {{
-                    donchian: {{ pnl: 0, equity: 105150 }},
-                    supertrend: {{ pnl: 0, equity: 105150 }},
-                    atr: {{ pnl: 0, equity: 105150 }}
+                    donchian: {{ pnl: 0, equity: 105150, drawdown: 0 }},
+                    supertrend: {{ pnl: 0, equity: 105150, drawdown: 0 }},
+                    atr: {{ pnl: 0, equity: 105150, drawdown: 0 }}
                 }};
 
                 for (let i = 0; i < this.timePoints.length; i++) {{
@@ -2941,13 +4176,16 @@ def build_html_content(
                         if (this.seriesData[k]) {{
                             const pt = this.seriesData[k].get(t);
                             if (pt) {{
+                                const ddVal = pt.drawdown !== undefined ? pt.drawdown : 0;
                                 row[k] = {{
                                     pnl: pt.value,
-                                    equity: pt.equity
+                                    equity: pt.equity,
+                                    drawdown: ddVal
                                 }};
                                 lastVals[k] = {{
                                     pnl: pt.value,
-                                    equity: pt.equity
+                                    equity: pt.equity,
+                                    drawdown: ddVal
                                 }};
                             }}
                         }}
@@ -2984,7 +4222,6 @@ def build_html_content(
                 const total = this.alignedPoints.length;
                 if (total === 0) return;
 
-                // 橫軸 X 為時間推進軸
                 const ratio = Math.max(0, Math.min(1, (mx - L.padLeft) / L.chartWidth));
                 const idx = Math.round(ratio * (total - 1));
 
@@ -3007,8 +4244,7 @@ def build_html_content(
                 const sVal = pt.supertrend;
                 const aVal = pt.atr;
 
-                // 尋找領先策略
-                const compKey = this.mode === 'PNL' ? 'pnl' : 'equity';
+                const compKey = this.mode === 'PNL' ? 'pnl' : (this.mode === 'EQUITY' ? 'equity' : 'drawdown');
                 let maxVal = -Infinity;
                 let leader = '';
                 if (this.visibleSeries.donchian && dVal[compKey] > maxVal) {{ maxVal = dVal[compKey]; leader = 'donchian'; }}
@@ -3016,13 +4252,17 @@ def build_html_content(
                 if (this.visibleSeries.atr && aVal[compKey] > maxVal) {{ maxVal = aVal[compKey]; leader = 'atr'; }}
 
                 const formatVal = (v) => {{
-                    const sign = v.pnl >= 0 ? '+' : '';
                     if (this.mode === 'PNL') {{
+                        const sign = v.pnl >= 0 ? '+' : '';
                         return `${{sign}}${{Math.round(v.pnl).toLocaleString('zh-TW')}} TWD`;
-                    }} else {{
+                    }} else if (this.mode === 'EQUITY') {{
                         return `${{Math.round(v.equity).toLocaleString('zh-TW')}} TWD`;
+                    }} else {{
+                        return `${{Math.round(v.drawdown).toLocaleString('zh-TW')}} TWD`;
                     }}
                 }};
+
+                const leaderBadgeText = this.mode === 'DRAWDOWN' ? '抗跌 👑' : '領先 👑';
 
                 let html = `
                     <div class="mt-header">
@@ -3038,7 +4278,7 @@ def build_html_content(
                             <span class="mt-strat-label">
                                 <span class="mt-strat-dot" style="background:#00e5ff;"></span>
                                 <span>布林_唐奇安</span>
-                                ${{isLeader ? '<span class="mt-leader-tag">領先 👑</span>' : ''}}
+                                ${{isLeader ? `<span class="mt-leader-tag">${{leaderBadgeText}}</span>` : ''}}
                             </span>
                             <span class="mt-strat-val" style="color:#00e5ff;">${{formatVal(dVal)}}</span>
                         </div>
@@ -3052,7 +4292,7 @@ def build_html_content(
                             <span class="mt-strat-label">
                                 <span class="mt-strat-dot" style="background:#f0b90b;"></span>
                                 <span>布林_超級趨勢</span>
-                                ${{isLeader ? '<span class="mt-leader-tag">領先 👑</span>' : ''}}
+                                ${{isLeader ? `<span class="mt-leader-tag">${{leaderBadgeText}}</span>` : ''}}
                             </span>
                             <span class="mt-strat-val" style="color:#f0b90b;">${{formatVal(sVal)}}</span>
                         </div>
@@ -3066,7 +4306,7 @@ def build_html_content(
                             <span class="mt-strat-label">
                                 <span class="mt-strat-dot" style="background:#b388ff;"></span>
                                 <span>布林_ATR基準</span>
-                                ${{isLeader ? '<span class="mt-leader-tag">領先 👑</span>' : ''}}
+                                ${{isLeader ? `<span class="mt-leader-tag">${{leaderBadgeText}}</span>` : ''}}
                             </span>
                             <span class="mt-strat-val" style="color:#b388ff;">${{formatVal(aVal)}}</span>
                         </div>
@@ -3076,7 +4316,7 @@ def build_html_content(
                 this.tooltip.innerHTML = html;
                 this.tooltip.style.display = 'block';
 
-                const tipW = 270;
+                const tipW = 275;
                 const tipH = 140;
                 let left = clientX + 16;
                 let top = clientY - 40;
@@ -3094,8 +4334,16 @@ def build_html_content(
                 this.draw();
             }}
 
+            setMode(newMode) {{
+                this.mode = newMode;
+                this.draw();
+                return this.mode;
+            }}
+
             toggleMode() {{
-                this.mode = this.mode === 'PNL' ? 'EQUITY' : 'PNL';
+                const order = ['PNL', 'EQUITY', 'DRAWDOWN'];
+                const nextIdx = (order.indexOf(this.mode) + 1) % order.length;
+                this.mode = order[nextIdx];
                 this.draw();
                 return this.mode;
             }}
@@ -3133,7 +4381,7 @@ def build_html_content(
                 ctx.clearRect(0, 0, w, h);
                 if (total === 0) return;
 
-                const compKey = this.mode === 'PNL' ? 'pnl' : 'equity';
+                const compKey = this.mode === 'PNL' ? 'pnl' : (this.mode === 'EQUITY' ? 'equity' : 'drawdown');
                 let minVal = Infinity;
                 let maxVal = -Infinity;
 
@@ -3151,27 +4399,30 @@ def build_html_content(
                 if (this.mode === 'PNL') {{
                     if (minVal > -3000) minVal = -3000;
                     if (maxVal < 16000) maxVal = 16000;
-                }} else {{
+                }} else if (this.mode === 'EQUITY') {{
                     if (minVal > 100000) minVal = 100000;
                     if (maxVal < 122000) maxVal = 122000;
+                }} else {{
+                    // 水下回撤曲線：頂部 0 軸，向下延伸至最大回撤
+                    maxVal = 500;
+                    if (minVal > -5000) minVal = -5000;
                 }}
 
-                // 上下留適度間隙
                 const margin = (maxVal - minVal) * 0.08;
                 minVal -= margin;
-                maxVal += margin;
+                if (this.mode !== 'DRAWDOWN') maxVal += margin;
 
                 const valRange = (maxVal - minVal) || 1;
                 const seriesConfigs = [
-                    {{ key: 'donchian', color: '#00e5ff', name: '唐奇安通道' }},
-                    {{ key: 'supertrend', color: '#f0b90b', name: '超級趨勢線' }},
-                    {{ key: 'atr', color: '#b388ff', name: 'ATR 基準' }}
+                    {{ key: 'donchian', color: '#00e5ff', fill: 'rgba(0, 229, 255, 0.08)', name: '唐奇安通道' }},
+                    {{ key: 'supertrend', color: '#f0b90b', fill: 'rgba(240, 185, 11, 0.08)', name: '超級趨勢線' }},
+                    {{ key: 'atr', color: '#b388ff', fill: 'rgba(179, 136, 255, 0.08)', name: 'ATR 基準' }}
                 ];
 
                 const padTop = 22;
                 const padBottom = 34;
                 const padLeft = 24;
-                const padRight = 85;
+                const padRight = 88;
                 const chartW = w - padLeft - padRight;
                 const chartH = h - padTop - padBottom;
 
@@ -3184,7 +4435,7 @@ def build_html_content(
                 const getY = (val) => padTop + chartH - ((val - minVal) / valRange) * chartH;
                 const getX = (idx) => padLeft + (idx / Math.max(1, total - 1)) * chartW;
 
-                // 1. 水平微弱損益網格線與右側 Y 軸刻度
+                // 1. 水平網格線與右側 Y 軸刻度
                 ctx.lineWidth = 1;
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
                 ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
@@ -3200,13 +4451,13 @@ def build_html_content(
                     ctx.lineTo(padLeft + chartW, y);
                     ctx.stroke();
 
-                    const sign = (curVal >= 0 && this.mode === 'PNL') ? '+' : '';
+                    const sign = (curVal > 0 && this.mode === 'PNL') ? '+' : '';
                     const label = `${{sign}}${{Math.round(curVal).toLocaleString('zh-TW')}} TWD`;
                     ctx.fillStyle = (curVal > 0) ? '#26a69a' : (curVal < 0 ? '#ef5350' : '#8b949e');
                     ctx.fillText(label, padLeft + chartW + 8, y + 4);
                 }}
 
-                // 2. 垂直微弱時間網格線與底部 X 軸時間刻度
+                // 2. 垂直時間網格線與底部 X 軸時間刻度
                 ctx.textAlign = 'center';
                 ctx.fillStyle = '#8b949e';
                 const timeSteps = 8;
@@ -3227,13 +4478,13 @@ def build_html_content(
                     ctx.fillText(shortDt, x, padTop + chartH + 18);
                 }}
 
-                // 3. 0 軸水平基準線 (或期初資金基準線)
-                const baseVal = this.mode === 'PNL' ? 0 : 105150;
+                // 3. 基準水平線 (0 基準線 / 期初資金 / 水下 0 軸水面線)
+                const baseVal = (this.mode === 'EQUITY') ? 105150 : 0;
                 if (baseVal >= minVal && baseVal <= maxVal) {{
                     const baseY = getY(baseVal);
                     ctx.save();
                     ctx.setLineDash([4, 4]);
-                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+                    ctx.strokeStyle = this.mode === 'DRAWDOWN' ? 'rgba(0, 229, 255, 0.45)' : 'rgba(255, 255, 255, 0.35)';
                     ctx.lineWidth = 1.5;
                     ctx.beginPath();
                     ctx.moveTo(padLeft, baseY);
@@ -3243,16 +4494,34 @@ def build_html_content(
                     ctx.fillStyle = '#ffffff';
                     ctx.font = '10px sans-serif';
                     ctx.textAlign = 'left';
-                    ctx.fillText(this.mode === 'PNL' ? '0 基準線' : '期初資金 (105,150 TWD)', padLeft + 6, baseY - 6);
+                    const baseTitle = this.mode === 'PNL'
+                        ? '0 損益基準線'
+                        : (this.mode === 'EQUITY' ? '期初資金基準線 (105,150 TWD)' : '🌊 歷史最高淨值水平面 (Drawdown = 0)');
+                    ctx.fillText(baseTitle, padLeft + 6, baseY - 6);
                     ctx.restore();
                 }}
 
-                // 4. 繪製三條策略曲線 (由左向右隨時間時序推進)
+                // 4. 繪製三條策略曲線 (水下回撤模式下附加半透明水下陰影)
                 seriesConfigs.forEach(sc => {{
                     if (!this.visibleSeries[sc.key]) return;
 
+                    if (this.mode === 'DRAWDOWN') {{
+                        const zeroY = getY(0);
+                        ctx.save();
+                        ctx.fillStyle = sc.fill;
+                        ctx.beginPath();
+                        ctx.moveTo(getX(0), zeroY);
+                        for (let i = 0; i < total; i++) {{
+                            ctx.lineTo(getX(i), getY(this.alignedPoints[i][sc.key][compKey]));
+                        }}
+                        ctx.lineTo(getX(total - 1), zeroY);
+                        ctx.closePath();
+                        ctx.fill();
+                        ctx.restore();
+                    }}
+
                     ctx.save();
-                    ctx.lineWidth = 2.4;
+                    ctx.lineWidth = (sc.key === currentStrategyKey) ? 2.8 : 2.1;
                     ctx.strokeStyle = sc.color;
                     ctx.beginPath();
 
@@ -3266,7 +4535,7 @@ def build_html_content(
                     ctx.restore();
                 }});
 
-                // 5. 十字準星 (跟隨滑鼠 X 軸時間時序位置)
+                // 5. 十字準星
                 if (this.hoverIndex >= 0 && this.hoverIndex < total) {{
                     const hx = getX(this.hoverIndex);
                     ctx.save();
@@ -3278,7 +4547,6 @@ def build_html_content(
                     ctx.stroke();
                     ctx.restore();
 
-                    // 各策略圓點標記
                     seriesConfigs.forEach(sc => {{
                         if (!this.visibleSeries[sc.key]) return;
                         const hy = getY(this.alignedPoints[this.hoverIndex][sc.key][compKey]);
@@ -3291,6 +4559,20 @@ def build_html_content(
                         ctx.stroke();
                     }});
                 }}
+            }}
+        }}
+
+        // 切換多策略圖表顯示模式 (PNL / EQUITY / DRAWDOWN)
+        function setMultiChartMode(mode) {{
+            if (!multiCompareChart) return;
+            multiCompareChart.setMode(mode);
+            document.querySelectorAll('.mode-pill-btn').forEach(btn => {{
+                btn.classList.toggle('active', btn.dataset.cmode === mode);
+            }});
+            if (txtAxisHint) {{
+                if (mode === 'PNL') txtAxisHint.textContent = '💡 橫軸 X = 時間時序推進 ｜ 縱軸 Y = 累積淨損益 (TWD)，點擊上方策略卡片可切換主圖活躍策略';
+                else if (mode === 'EQUITY') txtAxisHint.textContent = '💡 橫軸 X = 時間時序推進 ｜ 縱軸 Y = 帳戶總淨值 (TWD，含期初本金 105,150)';
+                else txtAxisHint.textContent = '💡 橫軸 X = 時間時序推進 ｜ 縱軸 Y = 水下回撤深度 (Drawdown TWD，越靠近 0 軸代表抗跌與修復力越強)';
             }}
         }}
 
@@ -3481,12 +4763,6 @@ def build_html_content(
 
                 this.layout = {{ padTop, padBottom, padLeft, padRight, getX, getY }};
 
-                // 網格線
-                ctx.lineWidth = 1;
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
-                ctx.fillStyle = '#787b86';
-                ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
-
                 const zeroX = getX(0);
                 ctx.save();
                 ctx.setLineDash([4, 4]);
@@ -3497,7 +4773,6 @@ def build_html_content(
                 ctx.stroke();
                 ctx.restore();
 
-                // 逐筆累計損益折線
                 ctx.save();
                 ctx.lineWidth = 2;
                 ctx.strokeStyle = '#089981';
@@ -3511,7 +4786,6 @@ def build_html_content(
                 ctx.stroke();
                 ctx.restore();
 
-                // 節點
                 for (let i = 0; i < total; i++) {{
                     const px = getX(this.equityPoints[i].cum_pnl);
                     const py = getY(i);
@@ -3524,10 +4798,6 @@ def build_html_content(
                 }}
             }}
         }}
-
-        // ==============================================================
-        // 互動事件與切換邏輯
-        // ==============================================================
 
         // 切換全畫面數據視圖 ⇄ 雙圖模式
         function toggleLayoutMode(skipFitContent = false) {{
@@ -3547,18 +4817,18 @@ def build_html_content(
                 showToast('已切換為：雙圖聯動視圖 (K 線主圖 + 數據面板)', 'info');
             }}
 
-            // 觸發自適應適配重繪
             setTimeout(() => {{
                 if (klineChart && !isSoloDataMode && !skipFitContent) klineChart.timeScale().fitContent();
                 if (perfChart) perfChart.timeScale().fitContent();
                 if (multiCompareChart) multiCompareChart.resizeAndDraw();
                 if (tradeEquityChart) tradeEquityChart.resizeAndDraw();
+                drawPnlHistogram();
             }}, 100);
         }}
 
         // ==============================================================
         // 核心三：前端高解析度即時回測引擎 (In-Browser Backtest Engine)
-        // 100% 對齊後端 Python BacktestEngine 狀態機撮合邏輯
+        // 100% 對齊後端 Python BacktestEngine 狀態機撮合邏輯與進階統計指標
         // ==============================================================
         function calculateWilderRma(series, length) {{
             const n = series.length;
@@ -3572,6 +4842,127 @@ def build_html_content(
                 rma[i] = alpha * series[i] + (1.0 - alpha) * rma[i - 1];
             }}
             return rma;
+        }}
+
+        // 前端同步計算進階機構級統計指標
+        function computeJsExtendedStats(trades, totalNetProfit, maxDd) {{
+            const nTrades = trades.length;
+            if (nTrades === 0) {{
+                return {{
+                    expectancy: 0, expectancyStr: '0',
+                    returnToMdd: 0, returnToMddStr: '0.00',
+                    sharpeRatio: 0, sharpeRatioStr: '0.00',
+                    maxConsecWins: 0, maxConsecLosses: 0, streakStr: '0連勝 / 0連敗',
+                    avgHoldMins: 0, avgWinHoldMins: 0, avgLossHoldMins: 0, avgHoldStr: '0 分',
+                    longStats: {{ count: 0, wins: 0, winRate: 0, netPnl: 0, pf: 0 }},
+                    shortStats: {{ count: 0, wins: 0, winRate: 0, netPnl: 0, pf: 0 }},
+                    sessionStats: {{
+                        day: {{ count: 0, wins: 0, winRate: 0, netPnl: 0, pf: 0 }},
+                        night: {{ count: 0, wins: 0, winRate: 0, netPnl: 0, pf: 0 }}
+                    }},
+                    exitBreakdown: []
+                }};
+            }}
+
+            const expectancy = totalNetProfit / nTrades;
+            const expSign = expectancy >= 0 ? '+' : '';
+            const absMdd = Math.abs(maxDd);
+            const retToMdd = absMdd > 0 ? (totalNetProfit / absMdd) : 0;
+
+            const pnls = trades.map(t => t.net_pnl);
+            const meanPnl = pnls.reduce((a, b) => a + b, 0) / nTrades;
+            const variance = pnls.reduce((acc, x) => acc + Math.pow(x - meanPnl, 2), 0) / Math.max(1, nTrades - 1);
+            const stdPnl = variance > 0 ? Math.sqrt(variance) : 0;
+            const sharpe = stdPnl > 0 ? (meanPnl / stdPnl) * Math.sqrt(nTrades) : 0;
+
+            let maxW = 0, maxL = 0, curW = 0, curL = 0;
+            for (const p of pnls) {{
+                if (p > 0) {{ curW++; curL = 0; if (curW > maxW) maxW = curW; }}
+                else if (p < 0) {{ curL++; curW = 0; if (curL > maxL) maxL = curL; }}
+            }}
+
+            const holdAll = trades.map(t => t.hold_mins || 0);
+            const holdWins = trades.filter(t => t.net_pnl > 0).map(t => t.hold_mins || 0);
+            const holdLosses = trades.filter(t => t.net_pnl <= 0).map(t => t.hold_mins || 0);
+            const avgHold = holdAll.length > 0 ? holdAll.reduce((a, b) => a + b, 0) / holdAll.length : 0;
+            const avgWinHold = holdWins.length > 0 ? holdWins.reduce((a, b) => a + b, 0) / holdWins.length : 0;
+            const avgLossHold = holdLosses.length > 0 ? holdLosses.reduce((a, b) => a + b, 0) / holdLosses.length : 0;
+
+            function calcSide(sub) {{
+                const cnt = sub.length;
+                if (cnt === 0) return {{ count: 0, wins: 0, winRate: 0, netPnl: 0, pf: 0 }};
+                const wList = sub.filter(x => x.net_pnl > 0).map(x => x.net_pnl);
+                const lList = sub.filter(x => x.net_pnl < 0).map(x => x.net_pnl);
+                const gw = wList.reduce((a, b) => a + b, 0);
+                const gl = Math.abs(lList.reduce((a, b) => a + b, 0));
+                const pf = gl > 0 ? (gw / gl) : (gw > 0 ? 99.0 : 0);
+                return {{
+                    count: cnt,
+                    wins: wList.length,
+                    winRate: Math.round((wList.length / cnt) * 10000) / 100,
+                    netPnl: Math.round(sub.reduce((a, x) => a + x.net_pnl, 0) * 10) / 10,
+                    pf: Math.round(pf * 100) / 100
+                }};
+            }}
+
+            const longTrades = trades.filter(t => t.side === 'LONG');
+            const shortTrades = trades.filter(t => t.side === 'SHORT');
+
+            const dayTrades = [];
+            const nightTrades = [];
+            for (const t of trades) {{
+                const tsStr = String(t.entry_time || '');
+                let hr = 9;
+                if (tsStr.length >= 13) {{
+                    const parsed = parseInt(tsStr.substring(11, 13), 10);
+                    if (!isNaN(parsed)) hr = parsed;
+                }}
+                if (hr >= 8 && hr <= 13) dayTrades.push(t);
+                else nightTrades.push(t);
+            }}
+
+            const reasonMap = new Map();
+            for (const t of trades) {{
+                if (!reasonMap.has(t.exit_reason)) reasonMap.set(t.exit_reason, []);
+                reasonMap.get(t.exit_reason).push(t.net_pnl);
+            }}
+            const exitBreakdown = [];
+            for (const [rName, rPnls] of reasonMap.entries()) {{
+                const rCnt = rPnls.length;
+                const rTot = rPnls.reduce((a, b) => a + b, 0);
+                const rWins = rPnls.filter(v => v > 0).length;
+                exitBreakdown.push({{
+                    reason: rName,
+                    count: rCnt,
+                    ratioPct: Math.round((rCnt / nTrades) * 1000) / 10,
+                    totalPnl: Math.round(rTot * 10) / 10,
+                    avgPnl: Math.round((rTot / rCnt) * 10) / 10,
+                    winRate: Math.round((rWins / rCnt) * 1000) / 10
+                }});
+            }}
+
+            return {{
+                expectancy: Math.round(expectancy * 10) / 10,
+                expectancyStr: `${{expSign}}${{Math.round(expectancy).toLocaleString('zh-TW')}}`,
+                returnToMdd: Math.round(retToMdd * 100) / 100,
+                returnToMddStr: retToMdd.toFixed(2),
+                sharpeRatio: Math.round(sharpe * 100) / 100,
+                sharpeRatioStr: sharpe.toFixed(2),
+                maxConsecWins: maxW,
+                maxConsecLosses: maxL,
+                streakStr: `${{maxW}}連勝 / ${{maxL}}連敗`,
+                avgHoldMins: Math.round(avgHold * 10) / 10,
+                avgWinHoldMins: Math.round(avgWinHold * 10) / 10,
+                avgLossHoldMins: Math.round(avgLossHold * 10) / 10,
+                avgHoldStr: `${{Math.round(avgHold)}} 分 (${{(avgHold / 5).toFixed(1)}} 根)`,
+                longStats: calcSide(longTrades),
+                shortStats: calcSide(shortTrades),
+                sessionStats: {{
+                    day: calcSide(dayTrades),
+                    night: calcSide(nightTrades)
+                }},
+                exitBreakdown
+            }};
         }}
 
         function runFastBacktest(bars, config) {{
@@ -3613,7 +5004,6 @@ def build_html_content(
             const atrLen = Number(config.atr_length) || 14;
             const atrVal = calculateWilderRma(tr, atrLen);
 
-            // ATR Signal (MA of ATR)
             const atrSigLen = Number(config.atr_sig_length) || 5;
             const atrSig = new Array(n).fill(NaN);
             for (let i = atrSigLen - 1; i < n; i++) {{
@@ -3696,6 +5086,7 @@ def build_html_content(
             const taxRate = 0.00002;
             const slippage = Number(config.slippage) || 0.0;
             const exitMode = config.exit_mode || 'donchian';
+            const sizingMode = config.position_sizing_mode || 'margin';
 
             let equity = initialCap;
             let posSide = 'NONE';
@@ -3718,6 +5109,7 @@ def build_html_content(
             const equityCurve = [];
             let tradeCounter = 0;
             let runningCumPnl = 0;
+            let runningPeakEq = initialCap;
 
             function isThirdWednesday(tsStr) {{
                 if (!tsStr) return false;
@@ -3741,9 +5133,20 @@ def build_html_content(
 
                 // A. 進場執行 (Bar 3)
                 if (entryReadySide !== 'NONE' && posSide === 'NONE') {{
-                    const rawCapQty = Math.floor(equity / marginReq);
-                    const rawLevQty = Math.floor((equity * maxLeverage) / marginReq);
-                    const safeQty = Math.max(1, Math.min(rawCapQty, rawLevQty));
+                    let safeQty = 1;
+                    if (sizingMode === 'fixed_one_lot') {{
+                        safeQty = 1;
+                    }} else if (sizingMode === 'notional') {{
+                        const maxContractVal = equity * maxLeverage;
+                        const singleContractVal = curOpen * pointValue;
+                        const theoreticalQty = maxContractVal / singleContractVal;
+                        const marginQty = equity / marginReq;
+                        safeQty = Math.max(0, Math.floor(Math.min(theoreticalQty, marginQty)));
+                    }} else {{
+                        const rawCapQty = Math.floor(equity / marginReq);
+                        const rawLevQty = Math.floor((equity * maxLeverage) / marginReq);
+                        safeQty = Math.max(1, Math.min(rawCapQty, rawLevQty));
+                    }}
 
                     if (safeQty >= 1) {{
                         const fillPrice = (entryReadySide === 'LONG') ? (curOpen + slippage) : (curOpen - slippage);
@@ -3819,6 +5222,8 @@ def build_html_content(
                         else if (exitReason === 'DONCHIAN_EXIT') exitReasonZh = '唐奇安出場';
                         else if (exitReason === 'SUPERTREND_EXIT') exitReasonZh = '超級趨勢出場';
 
+                        const holdMins = Math.max(5, Math.round((curTs - times[posEntryIdx]) / 60));
+
                         trades.push({{
                             trade_id: tradeCounter,
                             side: posSide,
@@ -3834,7 +5239,8 @@ def build_html_content(
                             return_pct: Math.round(((actualExitPrice - posEntryPrice) / posEntryPrice * (posSide === 'LONG' ? 1 : -1) * 100) * 100) / 100,
                             equity_after: Math.round(equity * 100) / 100,
                             entry_ts: times[posEntryIdx],
-                            exit_ts: curTs
+                            exit_ts: curTs,
+                            hold_mins: holdMins
                         }});
 
                         posSide = 'NONE';
@@ -3880,7 +5286,7 @@ def build_html_content(
                     }}
                 }}
 
-                // D. 記錄每根 K 線浮動淨值
+                // D. 記錄每根 K 線浮動淨值與水下回撤
                 let curEq = equity;
                 if (posSide !== 'NONE') {{
                     const unrealized = (posSide === 'LONG')
@@ -3888,10 +5294,14 @@ def build_html_content(
                         : (posEntryPrice - curClose) * pointValue * posQty;
                     curEq += unrealized;
                 }}
+                if (curEq > runningPeakEq) runningPeakEq = curEq;
+                const ddNow = curEq - runningPeakEq;
+
                 equityCurve.push({{
                     time: curTs,
                     value: Math.round((curEq - initialCap) * 100) / 100,
                     equity: Math.round(curEq * 100) / 100,
+                    drawdown: Math.round(ddNow * 100) / 100,
                     close: curClose,
                     in_position: (posSide !== 'NONE')
                 }});
@@ -3909,7 +5319,6 @@ def build_html_content(
             const avgLoss = losses.length > 0 ? (grossLoss / losses.length) : 0;
             const payoff = avgLoss > 0 ? (avgWin / avgLoss) : 0;
 
-            // 計算 MDD
             let peak = -Infinity;
             let maxDd = 0;
             let maxDdPct = 0;
@@ -3924,6 +5333,7 @@ def build_html_content(
             const netPnlSign = totalNetProfit >= 0 ? '+' : '';
             const retPct = (totalNetProfit / initialCap) * 100;
             const retPctSign = retPct >= 0 ? '+' : '';
+            const extStats = computeJsExtendedStats(trades, totalNetProfit, maxDd);
 
             const metrics = {{
                 strategyName: config.strategy_name || '自訂策略',
@@ -3953,7 +5363,8 @@ def build_html_content(
                 avgLoss: Math.round(avgLoss),
                 avgLossStr: `-${{Math.round(avgLoss).toLocaleString('zh-TW')}}`,
                 payoffRatio: Math.round(payoff * 100) / 100,
-                payoffRatioStr: payoff.toFixed(2)
+                payoffRatioStr: payoff.toFixed(2),
+                ...extStats
             }};
 
             // 7. 產生買賣 Markers
@@ -4020,7 +5431,8 @@ def build_html_content(
                 donchian_length: 4,
                 max_leverage: 7.0,
                 commission: 18.0,
-                slippage: 0.0
+                slippage: 0.0,
+                position_sizing_mode: 'notional'
             }},
             supertrend: {{
                 strategy_name: '布林_超級趨勢',
@@ -4032,7 +5444,8 @@ def build_html_content(
                 supertrend_multiplier: 2.0,
                 max_leverage: 7.0,
                 commission: 18.0,
-                slippage: 0.0
+                slippage: 0.0,
+                position_sizing_mode: 'notional'
             }},
             atr: {{
                 strategy_name: '布林_ATR基準',
@@ -4044,7 +5457,8 @@ def build_html_content(
                 atr_sig_length: 5,
                 max_leverage: 7.0,
                 commission: 18.0,
-                slippage: 0.0
+                slippage: 0.0,
+                position_sizing_mode: 'notional'
             }}
         }};
         const defaultStrategyConfigs = JSON.parse(JSON.stringify(strategyConfigs));
@@ -4055,30 +5469,32 @@ def build_html_content(
             const strat = STRATEGIES_DATA[stratKey];
             if (!strat) return;
             const m = strat.metrics;
+            const titleEl = document.getElementById(`kpi-title-${{stratKey}}`);
             const pnlEl = document.getElementById(`kpi-${{stratKey}}-pnl`);
             const winrateEl = document.getElementById(`kpi-${{stratKey}}-winrate`);
             const pfEl = document.getElementById(`kpi-${{stratKey}}-pf`);
-            const avgwinEl = document.getElementById(`kpi-${{stratKey}}-avgwin`);
+            const expEl = document.getElementById(`kpi-${{stratKey}}-exp`);
             const mddEl = document.getElementById(`kpi-${{stratKey}}-mdd`);
-            const tradesEl = document.getElementById(`kpi-${{stratKey}}-trades`);
-            const avglossEl = document.getElementById(`kpi-${{stratKey}}-avgloss`);
+            const calmarEl = document.getElementById(`kpi-${{stratKey}}-calmar`);
+            const avgwlEl = document.getElementById(`kpi-${{stratKey}}-avgwl`);
             const payoffEl = document.getElementById(`kpi-${{stratKey}}-payoff`);
 
+            if (titleEl) titleEl.textContent = strat.displayName;
             if (pnlEl) {{
                 pnlEl.textContent = m.totalNetProfitStr;
                 pnlEl.className = `kpi-sub-val ${{m.isProfit ? 'win' : 'loss'}}`;
             }}
-            if (winrateEl) winrateEl.textContent = m.winRateStr;
+            if (winrateEl) winrateEl.textContent = `${{m.winRateStr}} (${{m.totalTrades}}筆)`;
             if (pfEl) pfEl.textContent = m.profitFactorStr;
-            if (avgwinEl) avgwinEl.textContent = m.avgWinStr;
+            if (expEl) expEl.textContent = m.expectancyStr || '+0';
             if (mddEl) mddEl.textContent = m.maxDrawdownStr;
-            if (tradesEl) tradesEl.textContent = `${{m.totalTrades}} 筆`;
-            if (avglossEl) avglossEl.textContent = m.avgLossStr;
+            if (calmarEl) calmarEl.textContent = m.returnToMddStr || '0.00';
+            if (avgwlEl) avgwlEl.textContent = `${{m.avgWinStr}} / ${{m.avgLossStr}}`;
             if (payoffEl) payoffEl.textContent = m.payoffRatioStr;
         }}
 
         // 執行動態回測並動態連動刷新所有組件
-        function executeDynamicBacktest(stratKey, customConfig) {{
+        function executeDynamicBacktest(stratKey, customConfig, silentToast = false) {{
             const bars5m = KLINE_DATA['5m'] || [];
             if (bars5m.length === 0) return;
 
@@ -4087,47 +5503,110 @@ def build_html_content(
             const t1 = performance.now();
             const elapsedMs = Math.round((t1 - t0) * 10) / 10;
 
-            // 寫回全域資料庫
+            // 更新策略顯示名稱
+            if (stratKey === 'donchian') {{
+                STRATEGIES_DATA[stratKey].displayName = `布林_唐奇安 (N=${{customConfig.donchian_length}})`;
+            }} else if (stratKey === 'supertrend') {{
+                STRATEGIES_DATA[stratKey].displayName = `布林_超級趨勢 (${{customConfig.supertrend_length}}, ${{customConfig.supertrend_multiplier}})`;
+            }} else if (stratKey === 'atr') {{
+                STRATEGIES_DATA[stratKey].displayName = `布林_ATR基準 (${{customConfig.atr_length}}, ${{customConfig.atr_sig_length}})`;
+            }}
+
             STRATEGIES_DATA[stratKey].metrics = res.metrics;
             STRATEGIES_DATA[stratKey].trades = res.trades;
             STRATEGIES_DATA[stratKey].cumulative_pnl = res.cumulative_pnl;
             STRATEGIES_DATA[stratKey].markers = res.markers;
 
-            // 更新多策略 KPI 卡片
             updateKpiCard(stratKey);
 
-            // 更新多策略淨值圖
             if (multiCompareChart) {{
                 multiCompareChart.initData();
                 multiCompareChart.draw();
             }}
 
-            // 若目前活躍策略為該策略，同步更新所有視圖
             if (currentStrategyKey === stratKey) {{
                 renderKeyMetrics();
                 renderTradesTable();
+                renderQuantAnalytics();
                 if (tradeEquityChart) {{
                     tradeEquityChart.setTrades();
                     tradeEquityChart.draw();
                 }}
                 updateBaselineData();
+                const curBars = KLINE_DATA[currentInterval] || [];
+                updateExitOverlay(curBars);
                 if (showMarkers) {{
-                    const curBars = KLINE_DATA[currentInterval] || [];
                     applyMarkersToChart(alignMarkersToBars(res.markers, curBars));
                 }}
             }}
 
-            // 若布林長度或標準差有異動，動態更新主圖布林通道
             if (customConfig.bb_length || customConfig.bb_mult) {{
                 currentBBConfig.length = Number(customConfig.bb_length) || currentBBConfig.length;
                 currentBBConfig.mult = Number(customConfig.bb_mult) || currentBBConfig.mult;
                 updateBollingerBands(KLINE_DATA[currentInterval] || []);
             }}
 
-            // 更新 Modal 預覽數值
-            updateModalPreviewBox(res.metrics, elapsedMs);
+            if (activeModalStrat === stratKey) {{
+                updateModalPreviewBox(res.metrics, elapsedMs);
+            }}
 
-            showToast(`⚡ 回測完成！耗時 ${{elapsedMs}} ms ｜ ${{STRATEGIES_DATA[stratKey].displayName}} 淨利: ${{res.metrics.totalNetProfitStr}} TWD ｜ 勝率: ${{res.metrics.winRateStr}} ｜ PF: ${{res.metrics.profitFactorStr}}`, 'success');
+            if (!silentToast) {{
+                showToast(`⚡ 回測完成！耗時 ${{elapsedMs}} ms ｜ ${{STRATEGIES_DATA[stratKey].displayName}} 淨利: ${{res.metrics.totalNetProfitStr}} TWD ｜ 勝率: ${{res.metrics.winRateStr}} ｜ PF: ${{res.metrics.profitFactorStr}}`, 'success');
+            }}
+        }}
+
+        // 一鍵套用三張圖最佳化參數組合或恢復基準配置
+        function applyPresetProfile(profileName) {{
+            if (profileName === 'best_margin') {{
+                strategyConfigs.donchian = {{
+                    strategy_name: '布林_唐奇安',
+                    exit_mode: 'donchian',
+                    bb_length: 31,
+                    bb_mult: 1.75,
+                    pullback_ratio: 0.30,
+                    donchian_length: 2,
+                    max_leverage: 7.0,
+                    commission: 18.0,
+                    slippage: 0.0,
+                    position_sizing_mode: 'margin'
+                }};
+                strategyConfigs.supertrend = {{
+                    strategy_name: '布林_超級趨勢',
+                    exit_mode: 'supertrend',
+                    bb_length: 30,
+                    bb_mult: 1.80,
+                    pullback_ratio: 0.30,
+                    supertrend_length: 10,
+                    supertrend_multiplier: 1.0,
+                    max_leverage: 7.0,
+                    commission: 18.0,
+                    slippage: 0.0,
+                    position_sizing_mode: 'margin'
+                }};
+                strategyConfigs.atr = {{
+                    strategy_name: '布林_ATR基準',
+                    exit_mode: 'atr',
+                    bb_length: 30,
+                    bb_mult: 1.80,
+                    pullback_ratio: 0.40,
+                    atr_length: 14,
+                    atr_sig_length: 4,
+                    max_leverage: 8.0,
+                    commission: 18.0,
+                    slippage: 0.0,
+                    position_sizing_mode: 'margin'
+                }};
+                ['donchian', 'supertrend', 'atr'].forEach(k => executeDynamicBacktest(k, strategyConfigs[k], true));
+                populateModalInputs(activeModalStrat);
+                showToast('🌟 已一鍵套用【三張圖最佳化參數組合 (滿倉 3 口模式)】！ATR 淨利 +43,202 / 唐奇安 +20,839 / 超級趨勢 +17,193 TWD', 'success');
+            }} else {{
+                ['donchian', 'supertrend', 'atr'].forEach(k => {{
+                    strategyConfigs[k] = JSON.parse(JSON.stringify(defaultStrategyConfigs[k]));
+                    executeDynamicBacktest(k, strategyConfigs[k], true);
+                }});
+                populateModalInputs(activeModalStrat);
+                showToast('🔄 已恢復全部三大策略為【原始預設基準參數】', 'info');
+            }}
         }}
 
         function updateModalPreviewBox(m, elapsedMs) {{
@@ -4151,14 +5630,12 @@ def build_html_content(
             if (timeEl && elapsedMs !== undefined) timeEl.textContent = `⚡ 運算耗時: ${{elapsedMs}} ms`;
         }}
 
-        // 開啟 Modal 並設定輸入欄位
         function openParamsModal(stratKey) {{
             activeModalStrat = stratKey || currentStrategyKey || 'donchian';
             const modal = document.getElementById('params-modal-overlay');
             if (!modal) return;
             modal.classList.add('open');
 
-            // 更新策略標籤
             document.querySelectorAll('.params-strat-tab').forEach(tab => {{
                 tab.classList.toggle('active', tab.dataset.strat === activeModalStrat);
             }});
@@ -4173,17 +5650,25 @@ def build_html_content(
             document.getElementById('txt-exit-strat-name').textContent = STRATEGIES_DATA[stratKey].displayName;
             document.getElementById('res-preview-title').textContent = STRATEGIES_DATA[stratKey].displayName;
 
-            // 切換出場面板
             document.getElementById('panel-exit-donchian').style.display = (stratKey === 'donchian') ? 'grid' : 'none';
             document.getElementById('panel-exit-supertrend').style.display = (stratKey === 'supertrend') ? 'grid' : 'none';
             document.getElementById('panel-exit-atr').style.display = (stratKey === 'atr') ? 'grid' : 'none';
 
-            // 進場欄位
             setFieldSync('bb-len', cfg.bb_length);
             setFieldSync('bb-mult', cfg.bb_mult);
             setFieldSync('pullback', cfg.pullback_ratio);
 
-            // 出場欄位
+            const selSizing = document.getElementById('sel-sizing-mode');
+            const badgeSizing = document.getElementById('val-badge-sizing');
+            if (selSizing) {{
+                selSizing.value = cfg.position_sizing_mode || 'notional';
+            }}
+            if (badgeSizing) {{
+                badgeSizing.textContent = cfg.position_sizing_mode === 'margin'
+                    ? '滿倉模式 (3口)'
+                    : (cfg.position_sizing_mode === 'fixed_one_lot' ? '固定 1 口' : '預設槓桿風控');
+            }}
+
             if (stratKey === 'donchian') {{
                 setFieldSync('donchian-len', cfg.donchian_length);
             }} else if (stratKey === 'supertrend') {{
@@ -4194,13 +5679,11 @@ def build_html_content(
                 setFieldSync('atr-sig', cfg.atr_sig_length);
             }}
 
-            // 資金欄位
             setFieldSync('leverage', cfg.max_leverage);
             document.getElementById('num-commission').value = cfg.commission;
             document.getElementById('val-badge-commission').textContent = `${{cfg.commission}} 元`;
             setFieldSync('slippage', cfg.slippage);
 
-            // 預覽當前已存在指標
             const curM = STRATEGIES_DATA[stratKey].metrics;
             if (curM) updateModalPreviewBox(curM);
         }}
@@ -4220,7 +5703,6 @@ def build_html_content(
         }}
 
         function initParamsModal() {{
-            // 策略標籤切換
             document.querySelectorAll('.params-strat-tab').forEach(tab => {{
                 tab.addEventListener('click', () => {{
                     activeModalStrat = tab.dataset.strat;
@@ -4230,7 +5712,6 @@ def build_html_content(
                 }});
             }});
 
-            // 綁定 Slider 與 Input 雙向連動
             const fieldKeys = [
                 'bb-len', 'bb-mult', 'pullback',
                 'donchian-len', 'st-len', 'st-mult',
@@ -4264,7 +5745,18 @@ def build_html_content(
                 }}
             }});
 
-            // 手續費單獨輸入綁定
+            const selSizing = document.getElementById('sel-sizing-mode');
+            if (selSizing) {{
+                selSizing.addEventListener('change', () => {{
+                    const badgeSizing = document.getElementById('val-badge-sizing');
+                    if (badgeSizing) {{
+                        badgeSizing.textContent = selSizing.value === 'margin'
+                            ? '滿倉模式 (3口)'
+                            : (selSizing.value === 'fixed_one_lot' ? '固定 1 口' : '預設槓桿風控');
+                    }}
+                }});
+            }}
+
             const numComm = document.getElementById('num-commission');
             if (numComm) {{
                 numComm.addEventListener('input', () => {{
@@ -4273,13 +5765,13 @@ def build_html_content(
                 }});
             }}
 
-            // 執行回測按鈕
             if (btnRunBacktest) {{
                 btnRunBacktest.addEventListener('click', () => {{
                     const cfg = strategyConfigs[activeModalStrat];
                     cfg.bb_length = Number(document.getElementById('num-bb-len').value);
                     cfg.bb_mult = Number(document.getElementById('num-bb-mult').value);
                     cfg.pullback_ratio = Number(document.getElementById('num-pullback').value);
+                    if (selSizing) cfg.position_sizing_mode = selSizing.value;
 
                     if (activeModalStrat === 'donchian') {{
                         cfg.donchian_length = Number(document.getElementById('num-donchian-len').value);
@@ -4299,7 +5791,6 @@ def build_html_content(
                 }});
             }}
 
-            // 重設為初始預設值按鈕
             if (btnResetParams) {{
                 btnResetParams.addEventListener('click', () => {{
                     strategyConfigs[activeModalStrat] = JSON.parse(JSON.stringify(defaultStrategyConfigs[activeModalStrat]));
@@ -4308,52 +5799,62 @@ def build_html_content(
                     showToast(`已重設 [${{STRATEGIES_DATA[activeModalStrat].displayName}}] 為初始預設參數`, 'info');
                 }});
             }}
+
+            const btnApplyBest = document.getElementById('btn-apply-best-preset');
+            const btnApplyBase = document.getElementById('btn-apply-baseline-preset');
+            const btnQuickBest = document.getElementById('btn-quick-best-preset');
+            if (btnApplyBest) btnApplyBest.addEventListener('click', () => applyPresetProfile('best_margin'));
+            if (btnQuickBest) btnQuickBest.addEventListener('click', () => applyPresetProfile('best_margin'));
+            if (btnApplyBase) btnApplyBase.addEventListener('click', () => applyPresetProfile('baseline_notional'));
         }}
 
         // 切換活躍策略
         function switchActiveStrategy(stratKey) {{
             if (!STRATEGIES_DATA[stratKey]) return;
             currentStrategyKey = stratKey;
+            currentFocusedTradeId = null;
+            const banner = document.getElementById('trade-focus-banner');
+            if (banner) banner.style.display = 'none';
 
-            // 更新頂部策略按鈕狀態
             document.querySelectorAll('.strat-btn').forEach(btn => {{
                 btn.classList.toggle('active', btn.dataset.strat === stratKey);
             }});
 
-            // 更新關鍵數據卡片
             renderKeyMetrics();
+            renderQuantAnalytics();
 
-            // 更新主圖 Markers
             const bars = KLINE_DATA[currentInterval] || [];
             const strat = getActiveStrategy();
+            updateExitOverlay(bars);
             if (showMarkers) {{
                 const alignedMarkers = alignMarkersToBars(strat.markers, bars);
                 applyMarkersToChart(alignedMarkers);
             }}
+            showLastBarData();
 
-            // 更新時間軸 Baseline 資料
             updateBaselineData();
-
-            // 更新交易表格
             renderTradesTable();
 
-            // 更新逐筆損益圖
             if (tradeEquityChart) {{
                 tradeEquityChart.setTrades();
                 tradeEquityChart.draw();
+            }}
+            if (multiCompareChart) {{
+                multiCompareChart.draw();
             }}
 
             showToast(`已切換活躍策略為: ${{strat.displayName}}`, 'success');
         }}
 
-        // 切換下半部分頁標籤
+        // 切換下半部五個分頁標籤
         function setupTabEvents() {{
             const tabs = [
                 {{ tab: tabMultiCompare, wrapper: multiCompareWrapper }},
+                {{ tab: tabQuantAnalytics, wrapper: quantAnalyticsWrapper }},
                 {{ tab: tabTradeEquity, wrapper: tradeEquityWrapper }},
                 {{ tab: tabCumPnl, wrapper: perfChartWrapper }},
                 {{ tab: tabTradesTable, wrapper: tradesTableWrapper }}
-            ];
+            ].filter(item => item.tab && item.wrapper);
 
             tabs.forEach(({{ tab, wrapper }}) => {{
                 tab.addEventListener('click', () => {{
@@ -4365,9 +5866,10 @@ def build_html_content(
                     tab.classList.add('active');
                     wrapper.style.display = 'flex';
 
-                    // 觸發對應視圖重繪
                     if (tab === tabMultiCompare && multiCompareChart) {{
                         setTimeout(() => multiCompareChart.resizeAndDraw(), 50);
+                    }} else if (tab === tabQuantAnalytics) {{
+                        setTimeout(() => renderQuantAnalytics(), 50);
                     }} else if (tab === tabTradeEquity && tradeEquityChart) {{
                         setTimeout(() => tradeEquityChart.resizeAndDraw(), 50);
                     }} else if (tab === tabCumPnl && perfChart) {{
@@ -4377,15 +5879,77 @@ def build_html_content(
             }});
         }}
 
+        // 可拖曳上下分割條初始化
+        function initSplitResizer() {{
+            const resizer = document.getElementById('split-resizer');
+            const perfSec = document.getElementById('performance-section');
+            if (!resizer || !klineSection || !perfSec || !workspaceSplit) return;
+
+            let isDragging = false;
+            resizer.addEventListener('mousedown', (e) => {{
+                if (isSoloDataMode) return;
+                isDragging = true;
+                resizer.classList.add('dragging');
+                document.body.style.cursor = 'row-resize';
+                e.preventDefault();
+            }});
+
+            window.addEventListener('mousemove', (e) => {{
+                if (!isDragging) return;
+                const rect = workspaceSplit.getBoundingClientRect();
+                const relY = e.clientY - rect.top;
+                const pct = Math.max(22, Math.min(78, (relY / rect.height) * 100));
+                klineSection.style.flex = `${{pct}}`;
+                perfSec.style.flex = `${{100 - pct}}`;
+                if (multiCompareChart) multiCompareChart.resizeAndDraw();
+                if (tradeEquityChart) tradeEquityChart.resizeAndDraw();
+                drawPnlHistogram();
+            }});
+
+            window.addEventListener('mouseup', () => {{
+                if (!isDragging) return;
+                isDragging = false;
+                resizer.classList.remove('dragging');
+                document.body.style.cursor = '';
+            }});
+        }}
+
+        // 全域鍵盤快捷鍵系統
+        function initKeyboardShortcuts() {{
+            window.addEventListener('keydown', (e) => {{
+                const tag = (e.target && e.target.tagName) ? e.target.tagName.toUpperCase() : '';
+                if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+
+                if (e.key === 'Escape') {{
+                    if (paramsModalOverlay && paramsModalOverlay.classList.contains('open')) {{
+                        paramsModalOverlay.classList.remove('open');
+                    }} else if (currentFocusedTradeId !== null) {{
+                        clearTradeFocus();
+                    }}
+                }} else if (e.code === 'Space') {{
+                    e.preventDefault();
+                    toggleLayoutMode();
+                }} else if (e.key === '1') {{
+                    switchActiveStrategy('donchian');
+                }} else if (e.key === '2') {{
+                    switchActiveStrategy('supertrend');
+                }} else if (e.key === '3') {{
+                    switchActiveStrategy('atr');
+                }} else if (e.key === '[' || e.key === 'ArrowLeft') {{
+                    navigateFocusedTrade(-1);
+                }} else if (e.key === ']' || e.key === 'ArrowRight') {{
+                    navigateFocusedTrade(1);
+                }}
+            }});
+        }}
+
         // 事件監聽綁定
         function setupEventListeners() {{
-            // 頂部全畫面切換按鈕
             const btnToggleLayout = document.getElementById('btn-toggle-layout');
             if (btnToggleLayout) {{
-                btnToggleLayout.addEventListener('click', toggleLayoutMode);
+                btnToggleLayout.addEventListener('click', () => toggleLayoutMode());
             }}
 
-            // 布林通道開關
             if (btnToggleBb) {{
                 btnToggleBb.addEventListener('click', () => {{
                     showBollingerBands = !showBollingerBands;
@@ -4397,11 +5961,19 @@ def build_html_content(
                 }});
             }}
 
-            // 策略參數調校 Modal 開啟 / 關閉
-            if (btnOpenParamsModal) {{
-                btnOpenParamsModal.addEventListener('click', () => {{
-                    openParamsModal();
+            if (btnToggleExitLine) {{
+                btnToggleExitLine.addEventListener('click', () => {{
+                    showExitOverlay = !showExitOverlay;
+                    btnToggleExitLine.classList.toggle('active', showExitOverlay);
+                    if (txtToggleExitLine) txtToggleExitLine.textContent = `🛡️ 出場軌道: ${{showExitOverlay ? '顯示' : '隱藏'}}`;
+                    const bars = KLINE_DATA[currentInterval] || [];
+                    updateExitOverlay(bars);
+                    showToast(`出場軌道線已${{showExitOverlay ? '開啟顯示' : '隱藏'}}`, 'info');
                 }});
+            }}
+
+            if (btnOpenParamsModal) {{
+                btnOpenParamsModal.addEventListener('click', () => openParamsModal());
             }}
             if (btnCloseParamsModal && paramsModalOverlay) {{
                 btnCloseParamsModal.addEventListener('click', () => {{
@@ -4416,17 +5988,16 @@ def build_html_content(
                 }});
             }}
 
-            // 初始化參數調校控制器
             initParamsModal();
+            initSplitResizer();
+            initKeyboardShortcuts();
 
-            // 頂部策略切換
             document.querySelectorAll('.strat-btn').forEach(btn => {{
                 btn.addEventListener('click', () => {{
                     switchActiveStrategy(btn.dataset.strat);
                 }});
             }});
 
-            // 週期切換
             document.querySelectorAll('.tf-btn').forEach(btn => {{
                 btn.addEventListener('click', () => {{
                     document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
@@ -4435,7 +6006,6 @@ def build_html_content(
                 }});
             }});
 
-            // Markers 開關
             const toggleMarkersBtn = document.getElementById('toggle-markers-btn');
             if (toggleMarkersBtn) {{
                 toggleMarkersBtn.addEventListener('click', () => {{
@@ -4448,7 +6018,6 @@ def build_html_content(
                 }});
             }}
 
-            // 適配縮放按鈕
             const fitBtn = document.getElementById('btn-fit-chart');
             if (fitBtn) {{
                 fitBtn.addEventListener('click', () => {{
@@ -4456,6 +6025,7 @@ def build_html_content(
                     if (perfChart) perfChart.timeScale().fitContent();
                     if (multiCompareChart) multiCompareChart.resizeAndDraw();
                     if (tradeEquityChart) tradeEquityChart.resizeAndDraw();
+                    drawPnlHistogram();
                 }});
             }}
 
@@ -4467,18 +6037,18 @@ def build_html_content(
                 }});
             }}
 
-            // 切換對比模式 (損益 / 總淨值)
             const toggleCompareModeBtn = document.getElementById('btn-toggle-compare-mode');
             if (toggleCompareModeBtn) {{
                 toggleCompareModeBtn.addEventListener('click', () => {{
                     if (multiCompareChart) {{
                         const m = multiCompareChart.toggleMode();
-                        showToast(`已切換對比模式為: ${{m === 'PNL' ? '累積淨損益 (TWD)' : '帳戶總權益 (TWD)'}}`, 'success');
+                        setMultiChartMode(m);
+                        const labelMap = {{ PNL: '累積淨損益 (TWD)', EQUITY: '帳戶總權益 (TWD)', DRAWDOWN: '水下回撤曲線 (Drawdown)' }};
+                        showToast(`已切換視圖模式為: ${{labelMap[m]}}`, 'success');
                     }}
                 }});
             }}
 
-            // 圖例開關
             const chkDonchian = document.getElementById('chk-donchian');
             const chkSupertrend = document.getElementById('chk-supertrend');
             const chkAtr = document.getElementById('chk-atr');
@@ -4486,6 +6056,10 @@ def build_html_content(
             if (chkDonchian) chkDonchian.addEventListener('change', (e) => multiCompareChart && multiCompareChart.toggleSeries('donchian', e.target.checked));
             if (chkSupertrend) chkSupertrend.addEventListener('change', (e) => multiCompareChart && multiCompareChart.toggleSeries('supertrend', e.target.checked));
             if (chkAtr) chkAtr.addEventListener('change', (e) => multiCompareChart && multiCompareChart.toggleSeries('atr', e.target.checked));
+
+            window.addEventListener('resize', () => {{
+                drawPnlHistogram();
+            }});
         }}
 
         // Toast 通知
@@ -4539,18 +6113,18 @@ def build_html_content(
 
         // 全域初始化入口
         function initDashboard() {{
+            ['donchian', 'supertrend', 'atr'].forEach(k => updateKpiCard(k));
             renderKeyMetrics();
+            renderQuantAnalytics();
             initKlineChart();
             initPerfChart();
 
-            // 初始化多策略同屏對比圖表
             if (multiCanvas && multiViewport && multiTooltip) {{
                 multiCompareChart = new MultiStrategyCompareChart(multiCanvas, multiViewport, multiTooltip);
                 window.multiCompareChart = multiCompareChart;
                 setTimeout(() => multiCompareChart.resizeAndDraw(), 100);
             }}
 
-            // 初始化單策略逐筆損益圖
             if (tradeEquityCanvas && canvasScrollViewport && tradeTooltip) {{
                 tradeEquityChart = new TradeEquityChart(tradeEquityCanvas, canvasScrollViewport, tradeTooltip);
                 window.tradeEquityChart = tradeEquityChart;
@@ -4564,7 +6138,6 @@ def build_html_content(
             loadIntervalData(currentInterval);
             initWebSocketClient();
 
-            // 若預設為全畫面數據視圖，確保 Canvas 適配容器全尺寸
             if (isSoloDataMode && multiCompareChart) {{
                 setTimeout(() => multiCompareChart.resizeAndDraw(), 200);
             }}
