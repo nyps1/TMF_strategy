@@ -1382,12 +1382,13 @@ def build_html_content(
             position: relative;
             width: 100%;
             height: 100%;
-            overflow-y: auto;
+            overflow: auto;
             background: #0d0e12;
             display: none;
         }}
         .trades-table {{
             width: 100%;
+            min-width: 1040px;
             border-collapse: collapse;
             font-size: 11px;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -1414,6 +1415,10 @@ def build_html_content(
             background: #181c28;
             cursor: pointer;
         }}
+        .trades-table tr.selected-trade-row {{
+            background: rgba(41, 98, 255, 0.18) !important;
+            border-left: 3px solid #2962ff !important;
+        }}
         .badge-side-long {{
             background: rgba(8, 153, 129, 0.18);
             color: #089981;
@@ -1438,18 +1443,61 @@ def build_html_content(
         }}
         .btn-focus-trade {{
             background: #1e2230;
-            color: #d1d4dc;
             border: 1px solid #2e3448;
+            color: #2962ff;
+            font-size: 11px;
+            font-weight: 600;
             padding: 2px 8px;
             border-radius: 4px;
             cursor: pointer;
-            font-size: 11px;
             transition: all 0.15s;
         }}
         .btn-focus-trade:hover {{
-            background: #089981;
+            background: #2962ff;
             color: #ffffff;
-            border-color: #089981;
+            border-color: #2962ff;
+        }}
+
+        /* 交易特寫聚焦浮動橫幅 */
+        .trade-focus-banner {{
+            position: absolute;
+            top: 48px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(20, 24, 36, 0.95);
+            border: 1px solid #2962ff;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+            border-radius: 6px;
+            padding: 6px 14px;
+            z-index: 25;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 12px;
+            color: #d1d4dc;
+            backdrop-filter: blur(8px);
+        }}
+        .trade-focus-banner .focus-badge {{
+            color: #ffffff;
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-weight: 700;
+            font-size: 11px;
+        }}
+        .trade-focus-banner .btn-close-focus {{
+            background: #2a3042;
+            border: 1px solid #3d4660;
+            color: #9299a8;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }}
+        .trade-focus-banner .btn-close-focus:hover {{
+            background: #f23645;
+            border-color: #f23645;
+            color: #ffffff;
         }}
 
         /* 浮水印與狀態指示徽章 */
@@ -1613,6 +1661,12 @@ def build_html_content(
                     <span class="legend-label" style="color:#ffb300; margin-left:4px;">中</span><span class="legend-value" id="legend-bb-middle" style="color:#ffb300;">--</span>
                     <span class="legend-label" style="color:#ef5350; margin-left:4px;">下</span><span class="legend-value" id="legend-bb-lower" style="color:#ef5350;">--</span>
                 </div>
+            </div>
+
+            <!-- 交易特寫聚焦浮動橫幅 -->
+            <div id="trade-focus-banner" class="trade-focus-banner" style="display: none;">
+                <div id="trade-focus-content" style="display: flex; align-items: center; gap: 10px;"></div>
+                <button class="btn-close-focus" onclick="clearTradeFocus()">✕ 恢復全景</button>
             </div>
 
             <div id="kline-container"></div>
@@ -2197,6 +2251,7 @@ def build_html_content(
                 }},
                 autoSize: true
             }});
+            window.klineChart = klineChart;
 
             if (typeof klineChart.addSeries === 'function' && window.LightweightCharts && window.LightweightCharts.CandlestickSeries) {{
                 candlestickSeries = klineChart.addSeries(window.LightweightCharts.CandlestickSeries, {{
@@ -2683,22 +2738,96 @@ def build_html_content(
             showLastBarData();
         }}
 
-        // 定位特定交易之時間範圍
-        function focusTradeOnChart(entryTs, exitTs) {{
-            // 若處於全畫面模式，點擊定位時自動切換回雙圖模式以便觀察
-            if (isSoloDataMode) {{
-                toggleLayoutMode();
-            }}
-            if (!klineChart) return;
-            const padSec = 3600 * 3;
-            const fromSec = entryTs - padSec;
-            const toSec = exitTs + padSec;
+        // 定位特定交易之時間範圍並放大特寫
+        function focusTradeOnChart(entryTs, exitTs, tradeId) {{
+            if (!entryTs || !exitTs) return;
 
-            try {{
-                klineChart.timeScale().setVisibleRange({{ from: fromSec, to: toSec }});
-            }} catch (e) {{
-                console.warn('定位時間範圍失敗:', e);
+            // 1. 若處於全畫面模式，點擊定位時自動切換回雙圖模式以便觀察，且避免 fitContent 覆蓋
+            let layoutSwitched = false;
+            if (isSoloDataMode) {{
+                toggleLayoutMode(true);
+                layoutSwitched = true;
             }}
+
+            // 2. 獲取該筆交易資訊
+            const strat = getActiveStrategy();
+            const trade = (strat.trades || []).find(t => t.trade_id === tradeId) || {{
+                trade_id: tradeId,
+                side: 'TRADE',
+                entry_time: '',
+                entry_price: 0,
+                exit_time: '',
+                exit_price: 0,
+                exit_reason: '出場',
+                net_pnl: 0
+            }};
+
+            // 3. 高亮表格當前行
+            document.querySelectorAll('#trades-table-body tr').forEach(r => r.classList.remove('selected-trade-row'));
+            const targetRow = document.getElementById(`trade-row-${{tradeId}}`);
+            if (targetRow) {{
+                targetRow.classList.add('selected-trade-row');
+            }}
+
+            // 4. 平滑滾動至 K 線主圖
+            const klineSectionEl = document.getElementById('kline-section');
+            if (klineSectionEl) {{
+                klineSectionEl.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+            }}
+
+            // 5. 延遲 120ms (等待 DOM 展開與寬度計算完成後) 精確縮放可視區間
+            const delayMs = layoutSwitched ? 150 : 30;
+            setTimeout(() => {{
+                if (!klineChart) return;
+                // 計算前後各約 1.5 ~ 2 小時 (約 18 ~ 24 根 5 分 K) 之特寫緩衝
+                const duration = Math.max(0, exitTs - entryTs);
+                const padSec = Math.max(3600 * 1.5, Math.min(3600 * 4, duration * 1.5));
+                const fromSec = entryTs - padSec;
+                const toSec = exitTs + padSec;
+
+                try {{
+                    klineChart.timeScale().setVisibleRange({{ from: fromSec, to: toSec }});
+                }} catch (e) {{
+                    console.warn('定位時間範圍失敗:', e);
+                }}
+
+                // 6. 顯示頂部交易特寫橫幅 Banner
+                showTradeFocusBanner(trade);
+            }}, delayMs);
+        }}
+
+        // 清除交易聚焦狀態並恢復全景
+        function clearTradeFocus() {{
+            const banner = document.getElementById('trade-focus-banner');
+            if (banner) banner.style.display = 'none';
+            document.querySelectorAll('#trades-table-body tr').forEach(r => r.classList.remove('selected-trade-row'));
+            if (klineChart) {{
+                klineChart.timeScale().fitContent();
+            }}
+            showToast('已恢復全景檢視', 'info');
+        }}
+
+        // 顯示交易特寫橫幅
+        function showTradeFocusBanner(trade) {{
+            const banner = document.getElementById('trade-focus-banner');
+            const content = document.getElementById('trade-focus-content');
+            if (!banner || !content) return;
+
+            const isLong = trade.side === 'LONG';
+            const isProfit = (trade.net_pnl || 0) >= 0;
+            const pnlSign = isProfit ? '+' : '';
+            const pnlColor = isProfit ? '#089981' : '#f23645';
+            const sideColor = isLong ? '#089981' : '#f23645';
+            const sideText = isLong ? '買進做多' : '放空賣出';
+
+            content.innerHTML = `
+                <span class="focus-badge" style="background:${{sideColor}};">#${{trade.trade_id}} ${{sideText}}</span>
+                <span>進場: <b>${{trade.entry_time}}</b> @ <b>${{Number(trade.entry_price).toFixed(1)}}</b></span>
+                <span style="color:#787b86;">➔</span>
+                <span>出場: <b>${{trade.exit_time}}</b> @ <b>${{Number(trade.exit_price).toFixed(1)}}</b> (${{trade.exit_reason}})</span>
+                <span>損益: <b style="color:${{pnlColor}}; font-size:13px;">${{pnlSign}}${{Number(trade.net_pnl).toLocaleString('zh-TW', {{minimumFractionDigits: 1}})}} TWD</b></span>
+            `;
+            banner.style.display = 'flex';
         }}
 
         // 渲染交易明細表格
@@ -2712,6 +2841,7 @@ def build_html_content(
 
             trades.forEach(t => {{
                 const tr = document.createElement('tr');
+                tr.id = `trade-row-${{t.trade_id}}`;
                 const isLong = t.side === 'LONG';
                 const isProfit = t.net_pnl >= 0;
                 const pnlSign = isProfit ? '+' : '';
@@ -2731,8 +2861,9 @@ def build_html_content(
                     <td style="color:#787b86;">${{t.costs.toFixed(0)}}</td>
                     <td class="${{pnlClass}}">${{pnlSign}}${{t.net_pnl.toLocaleString('zh-TW', {{minimumFractionDigits: 1}})}}</td>
                     <td style="font-weight:600;">${{t.equity_after.toLocaleString('zh-TW', {{minimumFractionDigits: 1}})}}</td>
-                    <td><button class="btn-focus-trade" onclick="focusTradeOnChart(${{t.entry_ts}}, ${{t.exit_ts}})">定位</button></td>
+                    <td><button class="btn-focus-trade" onclick="event.stopPropagation(); focusTradeOnChart(${{t.entry_ts}}, ${{t.exit_ts}}, ${{t.trade_id}})">定位</button></td>
                 `;
+                tr.onclick = () => focusTradeOnChart(t.entry_ts, t.exit_ts, t.trade_id);
                 tbody.appendChild(tr);
             }});
         }}
@@ -3208,7 +3339,7 @@ def build_html_content(
                     if (this.hoverIndex > 0 && this.hoverIndex <= this.trades.length) {{
                         const t = this.trades[this.hoverIndex - 1];
                         if (t && t.entry_ts && t.exit_ts) {{
-                            focusTradeOnChart(t.entry_ts, t.exit_ts);
+                            focusTradeOnChart(t.entry_ts, t.exit_ts, t.trade_id);
                         }}
                     }}
                 }});
@@ -3399,7 +3530,7 @@ def build_html_content(
         // ==============================================================
 
         // 切換全畫面數據視圖 ⇄ 雙圖模式
-        function toggleLayoutMode() {{
+        function toggleLayoutMode(skipFitContent = false) {{
             isSoloDataMode = !isSoloDataMode;
             workspaceSplit.classList.toggle('solo-data-mode', isSoloDataMode);
 
@@ -3418,7 +3549,7 @@ def build_html_content(
 
             // 觸發自適應適配重繪
             setTimeout(() => {{
-                if (klineChart && !isSoloDataMode) klineChart.timeScale().fitContent();
+                if (klineChart && !isSoloDataMode && !skipFitContent) klineChart.timeScale().fitContent();
                 if (perfChart) perfChart.timeScale().fitContent();
                 if (multiCompareChart) multiCompareChart.resizeAndDraw();
                 if (tradeEquityChart) tradeEquityChart.resizeAndDraw();
@@ -3702,8 +3833,8 @@ def build_html_content(
                             cum_pnl: Math.round(runningCumPnl * 100) / 100,
                             return_pct: Math.round(((actualExitPrice - posEntryPrice) / posEntryPrice * (posSide === 'LONG' ? 1 : -1) * 100) * 100) / 100,
                             equity_after: Math.round(equity * 100) / 100,
-                            entry_ts: Math.floor(new Date(posEntryTime).getTime() / 1000),
-                            exit_ts: Math.floor(new Date(curTimeStr).getTime() / 1000)
+                            entry_ts: times[posEntryIdx],
+                            exit_ts: curTs
                         }});
 
                         posSide = 'NONE';
