@@ -1,5 +1,5 @@
 """
-動態布林突破策略 - 嚴格拉回確認版 (strategies/bollinger_pullback_strategy.py)
+布林動能突破策略 - 嚴格拉回確認版 (strategies/bollinger_pullback_strategy.py)
 
 由決策者構思之核心量化交易策略實體：
 1. 三根 K 棒狀態機 (Three-Bar State Machine)：
@@ -32,7 +32,7 @@ from strategies.common.risk import (
 
 class BollingerPullbackStrategy(BaseStrategy):
     """
-    動態布林突破策略 (嚴格拉回確認版) 決策實例。
+    布林動能突破策略 (嚴格拉回確認版) 決策實例。
     """
 
     def __init__(self, config: Optional[StrategyConfig] = None) -> None:

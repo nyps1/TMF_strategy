@@ -58,7 +58,7 @@ class StrategyConfig(BaseModel):
     此模型為決策者構思回測與實盤交易之核心控制介面。
     所有回測假設、指標長度、停利停損倍數與風控參數皆在此統一設定。
     """
-    strategy_name: str = "動態布林突破策略 (嚴格拉回確認版)"
+    strategy_name: str = "布林動能突破"
     symbol: str = "TMFJ6"
     interval: str = "5m"
 
