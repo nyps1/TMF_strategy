@@ -6,10 +6,13 @@
 
 from .models import SecondBarRecord, ExportConfig, ExportSummary
 from .exporter import TickExporter
+from .daily_updater import DailyDataSyncService
 
 __all__ = [
     "SecondBarRecord",
     "ExportConfig",
     "ExportSummary",
     "TickExporter",
+    "DailyDataSyncService",
 ]
+
