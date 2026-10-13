@@ -40,10 +40,12 @@ class TickExporter:
         contract,
         date_str: str,
         timeout: int = 30000,
-        max_retries: int = 3
+        max_retries: int = 3,
+        force_refresh: bool = False
     ) -> pd.DataFrame:
         """
         向 Shioaji API 下載指定交易日之逐筆成交 Tick 資料，並自動進行本機 Parquet 快取。
+        具備智慧快取失效機制：若快取僅包含前半段夜盤而當前已過日盤收盤（13:45），自動重新拉取全日數據。
 
         參數:
             api: 已連線之 shioaji.Shioaji 物件實例。
@@ -51,6 +53,7 @@ class TickExporter:
             date_str (str): 交易日字串 (格式: YYYY-MM-DD)。
             timeout (int): API 請求超時毫秒數，預設 30,000 毫秒。
             max_retries (int): 網路異常重試次數，預設 3 次。
+            force_refresh (bool): 是否強制忽略本機快取重新向 API 下載，預設 False。
 
         返回:
             pd.DataFrame: 當日逐筆成交 DataFrame（包含 ts, close, volume 欄位）。
@@ -59,9 +62,21 @@ class TickExporter:
             self.config.cache_dir,
             f"{contract.code}_{date_str}_ticks.parquet"
         )
-        if os.path.exists(cache_file):
-            logger.info(f"載入本機快取 Tick 資料: {cache_file}")
-            return pd.read_parquet(cache_file)
+        if os.path.exists(cache_file) and not force_refresh:
+            cached_df = pd.read_parquet(cache_file)
+            if not cached_df.empty and "ts" in cached_df.columns:
+                max_dt = pd.to_datetime(cached_df["ts"].max())
+                # 若快取僅至清晨 (<= 05:05)，且目前本機時間已超過下午 13:45，判定快取不完整需更新全日數據
+                now = pd.Timestamp.now()
+                is_today = (date_str == now.strftime("%Y-%m-%d"))
+                if is_today and max_dt.hour < 8 and (now.hour > 13 or (now.hour == 13 and now.minute >= 45)):
+                    logger.info(f"偵測到 {date_str} 快取僅包含夜盤數據 (最新時間: {max_dt})，已過日盤收盤，自動重新拉取全日數據...")
+                else:
+                    logger.info(f"載入本機快取 Tick 資料: {cache_file} (共 {len(cached_df):,} 筆)")
+                    return cached_df
+            else:
+                return cached_df
+
 
         for attempt in range(1, max_retries + 1):
             try:

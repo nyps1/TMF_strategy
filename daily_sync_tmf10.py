@@ -55,10 +55,19 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="預演模式，僅檢索並分析增量筆數，不實際寫入 Excel 與資料庫"
     )
+    parser.add_argument(
+        "--force-refresh",
+        action="store_true",
+        help="強制刷新模式，忽略本機快取重新向 API 下載最新全日 Tick 數據"
+    )
     return parser.parse_args()
 
 
-def run_daily_sync(target_date: str = None, dry_run: bool = False) -> Dict[str, Any]:
+def run_daily_sync(
+    target_date: str = None,
+    dry_run: bool = False,
+    force_refresh: bool = False
+) -> Dict[str, Any]:
     """
     執行微台10每日增量同步主邏輯。
 
@@ -111,7 +120,8 @@ def run_daily_sync(target_date: str = None, dry_run: bool = False) -> Dict[str, 
                 api=api,
                 contract=contract,
                 target_date=sync_date,
-                latest_time=latest_time
+                latest_time=latest_time,
+                force_refresh=force_refresh
             )
             print(f"  目標交易日     : {sync_date}")
             print(f"  最新已收錄時間 : {latest_time}")
@@ -125,7 +135,7 @@ def run_daily_sync(target_date: str = None, dry_run: bool = False) -> Dict[str, 
                 "latest_time": latest_time
             }
 
-        result = service.sync(api=api, target_date=target_date)
+        result = service.sync(api=api, target_date=target_date, force_refresh=force_refresh)
 
         print("\n" + "=" * 65)
         print("                     同步作業執行成果報表")
@@ -164,7 +174,11 @@ def run_daily_sync(target_date: str = None, dry_run: bool = False) -> Dict[str, 
 def main() -> None:
     """程式進入點。"""
     args = parse_arguments()
-    result = run_daily_sync(target_date=args.date, dry_run=args.dry_run)
+    result = run_daily_sync(
+        target_date=args.date,
+        dry_run=args.dry_run,
+        force_refresh=args.force_refresh
+    )
     if result.get("status") == "FAILED":
         sys.exit(1)
 

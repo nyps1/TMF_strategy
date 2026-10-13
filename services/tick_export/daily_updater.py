@@ -93,7 +93,8 @@ class DailyDataSyncService:
         api,
         contract,
         target_date: str,
-        latest_time: Optional[str] = None
+        latest_time: Optional[str] = None,
+        force_refresh: bool = False
     ) -> pd.DataFrame:
         """
         向 Shioaji 擷取指定交易日之逐筆成交 Tick，聚合為秒 K 線並執行增量過濾。
@@ -103,6 +104,7 @@ class DailyDataSyncService:
             contract: Shioaji 微台指期貨合約物件。
             target_date (str): 目標交易日 (格式: YYYY-MM-DD)。
             latest_time (Optional[str]): 系統目前收錄之最新時間戳，用於增量過濾。
+            force_refresh (bool): 是否強制刷新本機快取。
 
         返回:
             pd.DataFrame: 尚未收錄之全新增量秒 K 線 DataFrame。
@@ -111,7 +113,8 @@ class DailyDataSyncService:
         ticks_df = self.tick_exporter.fetch_and_cache_ticks(
             api=api,
             contract=contract,
-            date_str=target_date
+            date_str=target_date,
+            force_refresh=force_refresh
         )
 
         if ticks_df.empty:
@@ -258,7 +261,8 @@ class DailyDataSyncService:
     def sync(
         self,
         api,
-        target_date: Optional[str] = None
+        target_date: Optional[str] = None,
+        force_refresh: bool = False
     ) -> Dict[str, Any]:
         """
         執行每日微台10數據增量同步完整流程（Pipeline 執行入口）。
@@ -266,6 +270,7 @@ class DailyDataSyncService:
         參數:
             api: 已登入驗證之 Shioaji API 實例。
             target_date (Optional[str]): 指定同步之交易日 (格式: YYYY-MM-DD)。若為 None 則自動採用當前日期。
+            force_refresh (bool): 是否強制刷新本機快取重新自 API 下載。
 
         返回:
             Dict[str, Any]: 同步執行成果結構化報表資訊。
@@ -306,7 +311,8 @@ class DailyDataSyncService:
             api=api,
             contract=contract,
             target_date=sync_date,
-            latest_time=latest_time
+            latest_time=latest_time,
+            force_refresh=force_refresh
         )
 
         delta_count = len(df_new)
