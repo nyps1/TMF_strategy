@@ -189,9 +189,12 @@ def main() -> str:
     output_path = exporter.save()
 
     # 複製至 Artifacts 目錄便於下載
-    artifact_copy_path = os.path.join(ARTIFACT_DIR, "three_strategies_trades_comparison.xlsx")
-    shutil.copyfile(output_path, artifact_copy_path)
-    logger.info(f"已同步備份試算表至 Artifact 目錄: {artifact_copy_path}")
+    try:
+        artifact_copy_path = os.path.join(ARTIFACT_DIR, "three_strategies_trades_comparison.xlsx")
+        shutil.copyfile(output_path, artifact_copy_path)
+        logger.info(f"已同步備份試算表至 Artifact 目錄: {artifact_copy_path}")
+    except Exception as e:
+        logger.warning(f"同步至 Artifact 目錄警告: {e}")
 
     return output_path
 

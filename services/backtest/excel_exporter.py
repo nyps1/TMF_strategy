@@ -327,11 +327,24 @@ class ExcelStrategyExporter:
     def save(self) -> str:
         """
         儲存試算表至本機並回傳絕對路徑。
+        具備 Windows 檔案鎖定容錯重試機制，若檔案被外部 Excel 軟體佔用則自動切換至備用檔名。
 
         返回:
             str: 產出之 Excel 檔案絕對路徑。
         """
+        import time
         abs_path = os.path.abspath(self.filename)
-        self.wb.save(abs_path)
-        logger.info(f"Excel 試算表成功匯出: {abs_path}")
-        return abs_path
+        for attempt in range(3):
+            try:
+                self.wb.save(abs_path)
+                logger.info(f"Excel 試算表成功匯出: {abs_path}")
+                return abs_path
+            except PermissionError:
+                if attempt < 2:
+                    time.sleep(0.5)
+                    continue
+                # 第三次仍被佔用，儲存為獨立時間戳備用檔名避免管線中斷
+                backup_name = abs_path.replace(".xlsx", f"_backup_{int(time.time())}.xlsx")
+                self.wb.save(backup_name)
+                logger.warning(f"檔案 {abs_path} 正被外部程式佔用鎖定，已自動儲存至替代路徑: {backup_name}")
+                return backup_name
