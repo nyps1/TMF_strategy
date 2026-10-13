@@ -602,14 +602,243 @@ def build_html_content(
             display: flex;
             flex-wrap: wrap;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
             font-size: 12px;
             font-weight: 500;
-            background: rgba(15, 15, 17, 0.88);
+            background: rgba(15, 15, 17, 0.90);
             padding: 5px 12px;
             border-radius: 6px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            backdrop-filter: blur(4px);
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            backdrop-filter: blur(6px);
+        }}
+        .legend-bb-group {{
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding-left: 8px;
+            border-left: 1px solid #232838;
+        }}
+
+        /* 策略參數調整視窗 (Interactive Strategy Optimizer Modal) */
+        .params-modal-overlay {{
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(6px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }}
+        .params-modal-overlay.open {{
+            display: flex;
+        }}
+        .params-modal-card {{
+            width: 760px;
+            max-width: 95vw;
+            max-height: 90vh;
+            background: #141722;
+            border: 1px solid #28324a;
+            border-radius: 12px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 25px rgba(0, 229, 255, 0.15);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            animation: modalFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }}
+        @keyframes modalFadeIn {{
+            from {{ opacity: 0; transform: scale(0.96); }}
+            to {{ opacity: 1; transform: scale(1); }}
+        }}
+        .params-modal-header {{
+            padding: 16px 20px;
+            background: #191d2c;
+            border-bottom: 1px solid #242c40;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        .params-modal-title {{
+            font-size: 15px;
+            font-weight: 700;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+        .params-modal-close {{
+            background: transparent;
+            border: none;
+            color: #8b949e;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: all 0.15s;
+        }}
+        .params-modal-close:hover {{
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.08);
+        }}
+        .params-modal-body {{
+            padding: 18px 20px;
+            overflow-y: auto;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }}
+        .params-strat-selector {{
+            display: flex;
+            gap: 8px;
+            background: #0f1118;
+            padding: 4px;
+            border-radius: 8px;
+            border: 1px solid #222839;
+        }}
+        .params-strat-tab {{
+            flex: 1;
+            text-align: center;
+            padding: 7px 10px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #8b949e;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            user-select: none;
+        }}
+        .params-strat-tab.active {{
+            background: #1e2434;
+            color: #ffffff;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }}
+        .params-strat-tab[data-strat="donchian"].active {{
+            color: #00e5ff;
+            border: 1px solid rgba(0, 229, 255, 0.35);
+        }}
+        .params-strat-tab[data-strat="supertrend"].active {{
+            color: #f0b90b;
+            border: 1px solid rgba(240, 185, 11, 0.35);
+        }}
+        .params-strat-tab[data-strat="atr"].active {{
+            color: #b388ff;
+            border: 1px solid rgba(179, 136, 255, 0.35);
+        }}
+        .params-section {{
+            background: #171b26;
+            border: 1px solid #232b3d;
+            border-radius: 8px;
+            padding: 12px 16px;
+        }}
+        .params-section-title {{
+            font-size: 12px;
+            font-weight: 700;
+            color: #d1d4dc;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }}
+        .params-grid {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px 18px;
+        }}
+        .param-item {{
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }}
+        .param-label-row {{
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #8b949e;
+        }}
+        .param-val-badge {{
+            color: #00e5ff;
+            font-weight: 700;
+        }}
+        .param-input-row {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }}
+        .param-range {{
+            flex: 1;
+            accent-color: #00e5ff;
+            height: 4px;
+            border-radius: 2px;
+            background: #252c3e;
+            cursor: pointer;
+        }}
+        .param-num-input {{
+            width: 68px;
+            background: #0f1118;
+            border: 1px solid #2a334a;
+            border-radius: 4px;
+            color: #ffffff;
+            font-size: 12px;
+            font-family: monospace;
+            padding: 4px 6px;
+            text-align: right;
+        }}
+        .params-result-box {{
+            background: #11141e;
+            border: 1px solid #1f2738;
+            border-radius: 8px;
+            padding: 10px 14px;
+        }}
+        .params-modal-footer {{
+            padding: 12px 20px;
+            background: #191c28;
+            border-top: 1px solid #242b3e;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        .params-actions {{
+            display: flex;
+            gap: 10px;
+        }}
+        .btn-run-backtest {{
+            background: linear-gradient(135deg, #00b4d8 0%, #0077b6 100%);
+            color: #ffffff;
+            border: none;
+            padding: 8px 18px;
+            font-size: 12px;
+            font-weight: 700;
+            border-radius: 6px;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0, 180, 216, 0.35);
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }}
+        .btn-run-backtest:hover {{
+            background: linear-gradient(135deg, #0096c7 0%, #03045e 100%);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(0, 180, 216, 0.5);
+        }}
+        .btn-reset-params {{
+            background: #202636;
+            border: 1px solid #2c354a;
+            color: #a0a6b5;
+            padding: 8px 14px;
+            font-size: 12px;
+            font-weight: 600;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }}
+        .btn-reset-params:hover {{
+            color: #ffffff;
+            background: #2a3248;
         }}
         .legend-item {{
             display: flex;
@@ -1352,6 +1581,9 @@ def build_html_content(
                 <span class="live-indicator-dot"></span>
                 <span id="live-status-text">串流: 離線</span>
             </div>
+            <button class="toggle-btn active" id="toggle-bb-btn" title="切換顯示布林通道上中下軌">
+                <span id="txt-toggle-bb">🎯 布林軌道: 顯示</span>
+            </button>
             <button class="toggle-btn active" id="toggle-markers-btn">
                 <span>📍 交易標記: 顯示</span>
             </button>
@@ -1376,6 +1608,11 @@ def build_html_content(
                 <div class="legend-item"><span class="legend-label">收</span><span class="legend-value" id="legend-close">--</span></div>
                 <div class="legend-item"><span class="legend-label">漲跌</span><span class="legend-value" id="legend-change">--</span></div>
                 <div class="legend-item"><span class="legend-label">量</span><span class="legend-value" id="legend-volume">--</span></div>
+                <div class="legend-item legend-bb-group" id="legend-bb-group">
+                    <span class="legend-label" style="color:#26a69a;">BB上</span><span class="legend-value" id="legend-bb-upper" style="color:#26a69a;">--</span>
+                    <span class="legend-label" style="color:#ffb300; margin-left:4px;">中</span><span class="legend-value" id="legend-bb-middle" style="color:#ffb300;">--</span>
+                    <span class="legend-label" style="color:#ef5350; margin-left:4px;">下</span><span class="legend-value" id="legend-bb-lower" style="color:#ef5350;">--</span>
+                </div>
             </div>
 
             <div id="kline-container"></div>
@@ -1446,7 +1683,7 @@ def build_html_content(
                     </div>
                 </div>
                 <div class="perf-tools">
-                    <button class="perf-tool-btn highlight" id="btn-flip-axes" title="翻轉 X/Y 軸向">🔄 翻轉軸向 (目前: 橫軸X損益 × 縱軸Y時間)</button>
+                    <button class="perf-tool-btn highlight" id="btn-open-params-modal" title="微調策略參數並即時重新撮合回測">⚙️ 策略參數調校與即時回測</button>
                     <button class="perf-tool-btn" id="btn-toggle-compare-mode" title="切換累積損益或帳戶淨值">切換淨值/損益</button>
                     <button class="perf-tool-btn" id="btn-fit-chart" title="適配全屏">⛶ 適配縮放</button>
                 </div>
@@ -1537,7 +1774,7 @@ def build_html_content(
                         </label>
                     </div>
                     <div style="color:#787b86;">
-                        <span id="txt-axis-hint">💡 當前坐標：橫軸 X = 累積損益 (TWD) ｜ 縱軸 Y = 時間推進 (由上而下)，滑鼠 Hover 查看精準數值</span>
+                        <span id="txt-axis-hint">💡 坐標軸向：橫軸 X = 時間時序推進 ｜ 縱軸 Y = 累積損益 (TWD)，滑鼠 Hover 查看即時對比數值</span>
                     </div>
                 </div>
 
@@ -1601,6 +1838,201 @@ def build_html_content(
 
     </div>
 
+    <!-- 策略參數調校與即時回測視窗 (Interactive Strategy Optimizer Modal) -->
+    <div class="params-modal-overlay" id="params-modal-overlay">
+        <div class="params-modal-card">
+            <div class="params-modal-header">
+                <div class="params-modal-title">
+                    <span>⚙️ 策略參數調校與即時回測</span>
+                    <span style="font-size:11px; font-weight:normal; color:#8b949e;">(0毫秒極速撮合 3,947 根 K 棒，即時刷新淨值與布林軌道)</span>
+                </div>
+                <button class="params-modal-close" id="btn-close-params-modal" title="關閉視窗">✕</button>
+            </div>
+            <div class="params-modal-body">
+                <!-- 策略選擇標籤 -->
+                <div class="params-strat-selector">
+                    <div class="params-strat-tab active" data-strat="donchian">布林_唐奇安 (突破極值追蹤)</div>
+                    <div class="params-strat-tab" data-strat="supertrend">布林_超級趨勢 (單向不可逆)</div>
+                    <div class="params-strat-tab" data-strat="atr">布林_ATR基準 (動態均線對照)</div>
+                </div>
+
+                <!-- 區塊一：進場條件 (布林動能突破 + 1/4 拉回確認) -->
+                <div class="params-section">
+                    <div class="params-section-title">
+                        <span>🎯 進場型態條件 (布林通道突破與拉回濾網)</span>
+                    </div>
+                    <div class="params-grid">
+                        <div class="param-item">
+                            <div class="param-label-row">
+                                <span>布林通道週期 (BB Length)</span>
+                                <span class="param-val-badge" id="val-badge-bb-len">30</span>
+                            </div>
+                            <div class="param-input-row">
+                                <input type="range" class="param-range" id="range-bb-len" min="10" max="60" step="1" value="30">
+                                <input type="number" class="param-num-input" id="num-bb-len" min="10" max="60" step="1" value="30">
+                            </div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label-row">
+                                <span>布林標準差倍數 (BB Multiplier)</span>
+                                <span class="param-val-badge" id="val-badge-bb-mult">1.75</span>
+                            </div>
+                            <div class="param-input-row">
+                                <input type="range" class="param-range" id="range-bb-mult" min="1.0" max="3.0" step="0.05" value="1.75">
+                                <input type="number" class="param-num-input" id="num-bb-mult" min="1.0" max="3.0" step="0.05" value="1.75">
+                            </div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label-row">
+                                <span>拉回確認比例 (Pullback Ratio)</span>
+                                <span class="param-val-badge" id="val-badge-pullback">0.25 (1/4 K棒)</span>
+                            </div>
+                            <div class="param-input-row">
+                                <input type="range" class="param-range" id="range-pullback" min="0.10" max="0.50" step="0.05" value="0.25">
+                                <input type="number" class="param-num-input" id="num-pullback" min="0.10" max="0.50" step="0.05" value="0.25">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 區塊二：動態追蹤出場條件 (依選中策略動態顯示) -->
+                <div class="params-section">
+                    <div class="params-section-title">
+                        <span>🛡️ 動態追蹤出場機制 (<span id="txt-exit-strat-name">布林_唐奇安</span>)</span>
+                    </div>
+
+                    <!-- 唐奇安專屬參數 -->
+                    <div class="params-grid strat-exit-panel" id="panel-exit-donchian">
+                        <div class="param-item">
+                            <div class="param-label-row">
+                                <span>唐奇安通道週期 (Donchian Length N)</span>
+                                <span class="param-val-badge" id="val-badge-donchian-len">4</span>
+                            </div>
+                            <div class="param-input-row">
+                                <input type="range" class="param-range" id="range-donchian-len" min="2" max="30" step="1" value="4">
+                                <input type="number" class="param-num-input" id="num-donchian-len" min="2" max="30" step="1" value="4">
+                            </div>
+                        </div>
+                        <div class="param-item" style="justify-content:center; font-size:11px; color:#8b949e; line-height:1.5;">
+                            💡 說明：多單在 5 分 K 收盤跌破前 N 根最低價平倉；空單在收盤突破前 N 根最高價平倉。
+                        </div>
+                    </div>
+
+                    <!-- 超級趨勢專屬參數 -->
+                    <div class="params-grid strat-exit-panel" id="panel-exit-supertrend" style="display:none;">
+                        <div class="param-item">
+                            <div class="param-label-row">
+                                <span>SuperTrend ATR 週期 (Length)</span>
+                                <span class="param-val-badge" id="val-badge-st-len">14</span>
+                            </div>
+                            <div class="param-input-row">
+                                <input type="range" class="param-range" id="range-st-len" min="5" max="30" step="1" value="14">
+                                <input type="number" class="param-num-input" id="num-st-len" min="5" max="30" step="1" value="14">
+                            </div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label-row">
+                                <span>SuperTrend 乘數 (Multiplier)</span>
+                                <span class="param-val-badge" id="val-badge-st-mult">2.0</span>
+                            </div>
+                            <div class="param-input-row">
+                                <input type="range" class="param-range" id="range-st-mult" min="1.0" max="5.0" step="0.1" value="2.0">
+                                <input type="number" class="param-num-input" id="num-st-mult" min="1.0" max="5.0" step="0.1" value="2.0">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ATR 基準專屬參數 -->
+                    <div class="params-grid strat-exit-panel" id="panel-exit-atr" style="display:none;">
+                        <div class="param-item">
+                            <div class="param-label-row">
+                                <span>ATR 週期 (ATR Length)</span>
+                                <span class="param-val-badge" id="val-badge-atr-len">14</span>
+                            </div>
+                            <div class="param-input-row">
+                                <input type="range" class="param-range" id="range-atr-len" min="5" max="30" step="1" value="14">
+                                <input type="number" class="param-num-input" id="num-atr-len" min="5" max="30" step="1" value="14">
+                            </div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label-row">
+                                <span>ATR 訊號平滑週期 (Signal MA)</span>
+                                <span class="param-val-badge" id="val-badge-atr-sig">5</span>
+                            </div>
+                            <div class="param-input-row">
+                                <input type="range" class="param-range" id="range-atr-sig" min="2" max="20" step="1" value="5">
+                                <input type="number" class="param-num-input" id="num-atr-sig" min="2" max="20" step="1" value="5">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 區塊三：資金與交易成本 -->
+                <div class="params-section">
+                    <div class="params-section-title">
+                        <span>💰 資金槓桿與撮合摩擦成本</span>
+                    </div>
+                    <div class="params-grid">
+                        <div class="param-item">
+                            <div class="param-label-row">
+                                <span>最大槓桿倍數 (Max Leverage)</span>
+                                <span class="param-val-badge" id="val-badge-leverage">7.0x</span>
+                            </div>
+                            <div class="param-input-row">
+                                <input type="range" class="param-range" id="range-leverage" min="1.0" max="10.0" step="0.5" value="7.0">
+                                <input type="number" class="param-num-input" id="num-leverage" min="1.0" max="10.0" step="0.5" value="7.0">
+                            </div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label-row">
+                                <span>單邊手續費 (Commission TWD)</span>
+                                <span class="param-val-badge" id="val-badge-commission">18 元</span>
+                            </div>
+                            <div class="param-input-row">
+                                <input type="number" class="param-num-input" id="num-commission" min="0" max="100" step="1" value="18" style="width:100%;">
+                            </div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label-row">
+                                <span>預期單邊滑價 (Slippage Points)</span>
+                                <span class="param-val-badge" id="val-badge-slippage">0.0 點</span>
+                            </div>
+                            <div class="param-input-row">
+                                <input type="range" class="param-range" id="range-slippage" min="0.0" max="5.0" step="0.5" value="0.0">
+                                <input type="number" class="param-num-input" id="num-slippage" min="0.0" max="5.0" step="0.5" value="0.0">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 回測即時績效摘要欄 -->
+                <div class="params-result-box" id="params-result-box">
+                    <div style="font-weight:700; color:#00e5ff; display:flex; align-items:center; gap:6px;">
+                        <span>📊 回測績效預覽：</span>
+                        <span id="res-preview-title">布林_唐奇安</span>
+                        <span id="res-preview-time" style="font-size:11px; color:#8b949e; margin-left:auto;"></span>
+                    </div>
+                    <div style="display:flex; gap:16px; flex-wrap:wrap; font-size:12px; margin-top:6px;">
+                        <div>總淨利: <b id="res-preview-pnl" style="color:#00e5ff;">--</b></div>
+                        <div>勝率: <b id="res-preview-winrate">--</b></div>
+                        <div>獲利因子: <b id="res-preview-pf">--</b></div>
+                        <div>總交易: <b id="res-preview-trades">--</b></div>
+                        <div>最大回撤: <b id="res-preview-mdd" style="color:#ef5350;">--</b></div>
+                        <div>賺賠比: <b id="res-preview-payoff">--</b></div>
+                    </div>
+                </div>
+            </div>
+            <div class="params-modal-footer">
+                <div class="params-actions">
+                    <button class="btn-reset-params" id="btn-reset-params">🔄 重設為初始預設值</button>
+                </div>
+                <div class="params-actions">
+                    <button class="btn-run-backtest" id="btn-run-backtest">⚡ 立即執行回測 (Run Dynamic Backtest)</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         // 資料載入：三大策略完整數據集合與 11 種週期 K 線
         const KLINE_DATA = {data_json};
@@ -1616,6 +2048,17 @@ def build_html_content(
         let candlestickSeries = null;
         let volumeSeries = null;
         let markersPrimitive = null;
+
+        // 布林通道 (Upper, Middle, Lower)
+        let bbUpperSeries = null;
+        let bbMiddleSeries = null;
+        let bbLowerSeries = null;
+        let showBollingerBands = true;
+        let currentBBConfig = {{
+            length: 30,
+            mult: 1.75
+        }};
+        window.bbLookupMap = new Map();
 
         let perfChart = null;
         let baselineSeries = null;
@@ -1654,6 +2097,20 @@ def build_html_content(
         const legendVolume = document.getElementById('legend-volume');
         const legendStratTag = document.getElementById('legend-strat-tag');
         const currentStratIndicator = document.getElementById('current-strat-indicator');
+
+        // 布林與參數調校 DOM 快取
+        const legendBbUpper = document.getElementById('legend-bb-upper');
+        const legendBbMiddle = document.getElementById('legend-bb-middle');
+        const legendBbLower = document.getElementById('legend-bb-lower');
+        const legendBbGroup = document.getElementById('legend-bb-group');
+        const btnToggleBb = document.getElementById('toggle-bb-btn');
+        const txtToggleBb = document.getElementById('txt-toggle-bb');
+
+        const paramsModalOverlay = document.getElementById('params-modal-overlay');
+        const btnOpenParamsModal = document.getElementById('btn-open-params-modal');
+        const btnCloseParamsModal = document.getElementById('btn-close-params-modal');
+        const btnRunBacktest = document.getElementById('btn-run-backtest');
+        const btnResetParams = document.getElementById('btn-reset-params');
 
         const perfLegendVal = document.getElementById('perf-legend-val');
         const perfLegendTime = document.getElementById('perf-legend-time');
@@ -1778,6 +2235,59 @@ def build_html_content(
                     priceFormat: {{ type: 'volume' }},
                     priceScaleId: '',
                     scaleMargins: {{ top: 0.82, bottom: 0 }}
+                }});
+            }}
+
+            // 建立布林通道上中下軌線條
+            if (typeof klineChart.addSeries === 'function' && window.LightweightCharts && window.LightweightCharts.LineSeries) {{
+                bbUpperSeries = klineChart.addSeries(window.LightweightCharts.LineSeries, {{
+                    color: '#26a69a',
+                    lineWidth: 1.5,
+                    lineStyle: 0,
+                    priceLineVisible: false,
+                    lastValueVisible: true,
+                    title: 'BB 上軌'
+                }});
+                bbMiddleSeries = klineChart.addSeries(window.LightweightCharts.LineSeries, {{
+                    color: '#ffb300',
+                    lineWidth: 1,
+                    lineStyle: 2,
+                    priceLineVisible: false,
+                    lastValueVisible: false,
+                    title: 'BB 中軌'
+                }});
+                bbLowerSeries = klineChart.addSeries(window.LightweightCharts.LineSeries, {{
+                    color: '#ef5350',
+                    lineWidth: 1.5,
+                    lineStyle: 0,
+                    priceLineVisible: false,
+                    lastValueVisible: true,
+                    title: 'BB 下軌'
+                }});
+            }} else if (typeof klineChart.addLineSeries === 'function') {{
+                bbUpperSeries = klineChart.addLineSeries({{
+                    color: '#26a69a',
+                    lineWidth: 1.5,
+                    lineStyle: 0,
+                    priceLineVisible: false,
+                    lastValueVisible: true,
+                    title: 'BB 上軌'
+                }});
+                bbMiddleSeries = klineChart.addLineSeries({{
+                    color: '#ffb300',
+                    lineWidth: 1,
+                    lineStyle: 2,
+                    priceLineVisible: false,
+                    lastValueVisible: false,
+                    title: 'BB 中軌'
+                }});
+                bbLowerSeries = klineChart.addLineSeries({{
+                    color: '#ef5350',
+                    lineWidth: 1.5,
+                    lineStyle: 0,
+                    priceLineVisible: false,
+                    lastValueVisible: true,
+                    title: 'BB 下軌'
                 }});
             }}
 
@@ -2001,7 +2511,71 @@ def build_html_content(
             return aligned;
         }}
 
-        // 更新左上角 K 線數據
+        // 計算布林通道數據
+        function calculateBollingerBands(bars, length, mult) {{
+            const n = bars.length;
+            const upperData = [];
+            const middleData = [];
+            const lowerData = [];
+            const lookupMap = new Map();
+            if (n < length) return {{ upperData, middleData, lowerData, lookupMap }};
+
+            const closes = bars.map(b => Number(b.close));
+            const times = bars.map(b => Number(b.time));
+
+            let windowSum = 0;
+            for (let i = 0; i < length; i++) {{
+                windowSum += closes[i];
+            }}
+
+            for (let i = length - 1; i < n; i++) {{
+                if (i >= length) {{
+                    windowSum += closes[i] - closes[i - length];
+                }}
+                const mean = windowSum / length;
+                let varSum = 0;
+                for (let j = i - length + 1; j <= i; j++) {{
+                    const diff = closes[j] - mean;
+                    varSum += diff * diff;
+                }}
+                const std = Math.sqrt(varSum / length);
+                const upper = mean + mult * std;
+                const middle = mean;
+                const lower = mean - mult * std;
+                const t = times[i];
+
+                upperData.push({{ time: t, value: Number(upper.toFixed(1)) }});
+                middleData.push({{ time: t, value: Number(middle.toFixed(1)) }});
+                lowerData.push({{ time: t, value: Number(lower.toFixed(1)) }});
+
+                lookupMap.set(t, {{ upper, middle, lower }});
+            }}
+
+            return {{ upperData, middleData, lowerData, lookupMap }};
+        }}
+
+        // 更新當前週期之布林通道線條與圖例參照
+        function updateBollingerBands(bars) {{
+            if (!bars || bars.length === 0) return;
+            const len = currentBBConfig.length || 30;
+            const mult = currentBBConfig.mult || 1.75;
+            const bbRes = calculateBollingerBands(bars, len, mult);
+            window.bbLookupMap = bbRes.lookupMap;
+
+            if (bbUpperSeries && bbMiddleSeries && bbLowerSeries) {{
+                if (showBollingerBands) {{
+                    bbUpperSeries.setData(bbRes.upperData);
+                    bbMiddleSeries.setData(bbRes.middleData);
+                    bbLowerSeries.setData(bbRes.lowerData);
+                }} else {{
+                    bbUpperSeries.setData([]);
+                    bbMiddleSeries.setData([]);
+                    bbLowerSeries.setData([]);
+                }}
+            }}
+        }}
+
+        // 更新左上角 K 線數據 (包含布林軌道數值)
         function updateLegend(bar, volume, timestamp) {{
             const dtStr = bar.datetime || (bar.time ? new Date(bar.time * 1000).toLocaleString('zh-TW', {{ hour12: false }}) : '');
             legendTime.textContent = dtStr;
@@ -2017,6 +2591,21 @@ def build_html_content(
             legendChange.className = `legend-value ${{chg >= 0 ? 'up' : 'down'}}`;
 
             legendVolume.textContent = Number(volume || bar.volume || 0).toLocaleString('zh-TW');
+
+            // 更新布林數值
+            if (legendBbUpper && legendBbMiddle && legendBbLower) {{
+                const ts = Number(timestamp || bar.time);
+                if (window.bbLookupMap && window.bbLookupMap.has(ts)) {{
+                    const bbVal = window.bbLookupMap.get(ts);
+                    legendBbUpper.textContent = bbVal.upper.toFixed(1);
+                    legendBbMiddle.textContent = bbVal.middle.toFixed(1);
+                    legendBbLower.textContent = bbVal.lower.toFixed(1);
+                }} else {{
+                    legendBbUpper.textContent = '--';
+                    legendBbMiddle.textContent = '--';
+                    legendBbLower.textContent = '--';
+                }}
+            }}
         }}
 
         function showLastBarData() {{
@@ -2077,6 +2666,9 @@ def build_html_content(
 
             candlestickSeries.setData(cData);
             volumeSeries.setData(vData);
+
+            // 更新布林通道三軌
+            updateBollingerBands(rawBars);
 
             if (showMarkers) {{
                 const strat = getActiveStrategy();
@@ -2147,9 +2739,8 @@ def build_html_content(
 
         // ==============================================================
         // 核心一：同屏多策略淨值對比繪圖引擎 (MultiStrategyCompareChart)
-        // 支援：
-        // 1. 預設 X/Y 軸相反：橫軸 X = 累積損益 / 淨值 (TWD) ｜ 縱軸 Y = 時間推進 (由上向下)
-        // 2. 支援一鍵翻轉軸向 (切換為橫軸時間 × 縱軸損益)
+        // 經典標準走勢軸向：橫軸 X = 時間時序推進 ｜ 縱軸 Y = 累積損益 / 淨值 (TWD)
+        // 具備 0 軸水平基準虛線、底部日期時間刻度與右側損益刻度
         // ==============================================================
         class MultiStrategyCompareChart {{
             constructor(canvas, viewport, tooltip) {{
@@ -2159,7 +2750,7 @@ def build_html_content(
                 this.ctx = canvas.getContext('2d');
 
                 this.mode = 'PNL'; // 'PNL' (相對累積損益) 或 'EQUITY' (總淨值)
-                this.axisMode = 'X_PNL_Y_TIME'; // 預設使用者指定：橫軸 X = 損益/淨值，縱軸 Y = 時間推進
+                this.axisMode = 'X_TIME_Y_PNL'; // 永久固定唯一：橫軸 X = 時間推進，縱軸 Y = 累積損益
                 this.visibleSeries = {{
                     donchian: true,
                     supertrend: true,
@@ -2186,9 +2777,11 @@ def build_html_content(
                 keys.forEach(k => {{
                     const strat = STRATEGIES_DATA[k];
                     const map = new Map();
-                    strat.cumulative_pnl.forEach(pt => {{
-                        map.set(pt.time, pt);
-                    }});
+                    if (strat && strat.cumulative_pnl) {{
+                        strat.cumulative_pnl.forEach(pt => {{
+                            map.set(pt.time, pt);
+                        }});
+                    }}
                     this.seriesData[k] = map;
                 }});
 
@@ -2214,16 +2807,18 @@ def build_html_content(
                     }};
 
                     keys.forEach(k => {{
-                        const pt = this.seriesData[k].get(t);
-                        if (pt) {{
-                            row[k] = {{
-                                pnl: pt.value,
-                                equity: pt.equity
-                            }};
-                            lastVals[k] = {{
-                                pnl: pt.value,
-                                equity: pt.equity
-                            }};
+                        if (this.seriesData[k]) {{
+                            const pt = this.seriesData[k].get(t);
+                            if (pt) {{
+                                row[k] = {{
+                                    pnl: pt.value,
+                                    equity: pt.equity
+                                }};
+                                lastVals[k] = {{
+                                    pnl: pt.value,
+                                    equity: pt.equity
+                                }};
+                            }}
                         }}
                     }});
 
@@ -2258,16 +2853,9 @@ def build_html_content(
                 const total = this.alignedPoints.length;
                 if (total === 0) return;
 
-                let idx = -1;
-                if (this.axisMode === 'X_PNL_Y_TIME') {{
-                    // Y 軸為時間推進軸
-                    const ratio = Math.max(0, Math.min(1, (my - L.padTop) / L.chartHeight));
-                    idx = Math.round(ratio * (total - 1));
-                }} else {{
-                    // X 軸為時間推進軸
-                    const ratio = Math.max(0, Math.min(1, (mx - L.padLeft) / L.chartWidth));
-                    idx = Math.round(ratio * (total - 1));
-                }}
+                // 橫軸 X 為時間推進軸
+                const ratio = Math.max(0, Math.min(1, (mx - L.padLeft) / L.chartWidth));
+                const idx = Math.round(ratio * (total - 1));
 
                 if (idx !== this.hoverIndex) {{
                     this.hoverIndex = idx;
@@ -2299,9 +2887,9 @@ def build_html_content(
                 const formatVal = (v) => {{
                     const sign = v.pnl >= 0 ? '+' : '';
                     if (this.mode === 'PNL') {{
-                        return `${{sign}}${{v.pnl.toLocaleString('zh-TW', {{minimumFractionDigits: 1}})}} TWD`;
+                        return `${{sign}}${{Math.round(v.pnl).toLocaleString('zh-TW')}} TWD`;
                     }} else {{
-                        return `${{v.equity.toLocaleString('zh-TW', {{minimumFractionDigits: 1}})}} TWD`;
+                        return `${{Math.round(v.equity).toLocaleString('zh-TW')}} TWD`;
                     }}
                 }};
 
@@ -2381,19 +2969,6 @@ def build_html_content(
                 return this.mode;
             }}
 
-            flipAxes() {{
-                this.axisMode = (this.axisMode === 'X_PNL_Y_TIME') ? 'X_TIME_Y_PNL' : 'X_PNL_Y_TIME';
-                if (txtAxisHint) {{
-                    if (this.axisMode === 'X_PNL_Y_TIME') {{
-                        txtAxisHint.textContent = '💡 當前坐標：橫軸 X = 累積損益 (TWD) ｜ 縱軸 Y = 時間推進 (由上而下)，滑鼠 Hover 查看精準數值';
-                    }} else {{
-                        txtAxisHint.textContent = '💡 當前坐標：橫軸 X = 時間時序推進 ｜ 縱軸 Y = 累積損益 (TWD)，滑鼠 Hover 查看精準數值';
-                    }}
-                }}
-                this.draw();
-                return this.axisMode;
-            }}
-
             resizeAndDraw() {{
                 if (!this.viewport || !this.canvas) return;
                 const dpr = window.devicePixelRatio || 1;
@@ -2450,6 +3025,11 @@ def build_html_content(
                     if (maxVal < 122000) maxVal = 122000;
                 }}
 
+                // 上下留適度間隙
+                const margin = (maxVal - minVal) * 0.08;
+                minVal -= margin;
+                maxVal += margin;
+
                 const valRange = (maxVal - minVal) || 1;
                 const seriesConfigs = [
                     {{ key: 'donchian', color: '#00e5ff', name: '唐奇安通道' }},
@@ -2457,225 +3037,128 @@ def build_html_content(
                     {{ key: 'atr', color: '#b388ff', name: 'ATR 基準' }}
                 ];
 
-                // ==============================================================
-                // 佈局模式 A：使用者指定之【橫軸 X = 損益/淨值 ｜ 縱軸 Y = 時間推進】
-                // ==============================================================
-                if (this.axisMode === 'X_PNL_Y_TIME') {{
-                    const padTop = 26;
-                    const padBottom = 45;
-                    const padLeft = 85; // 留給日期時間刻度
-                    const padRight = 35;
-                    const chartW = w - padLeft - padRight;
-                    const chartH = h - padTop - padBottom;
+                const padTop = 22;
+                const padBottom = 34;
+                const padLeft = 24;
+                const padRight = 85;
+                const chartW = w - padLeft - padRight;
+                const chartH = h - padTop - padBottom;
 
-                    this.layout = {{
-                        padTop, padBottom, padLeft, padRight,
-                        chartWidth: chartW,
-                        chartHeight: chartH
-                    }};
+                this.layout = {{
+                    padTop, padBottom, padLeft, padRight,
+                    chartWidth: chartW,
+                    chartHeight: chartH
+                }};
 
-                    const getX = (val) => padLeft + ((val - minVal) / valRange) * chartW;
-                    const getY = (idx) => padTop + (idx / Math.max(1, total - 1)) * chartH;
+                const getY = (val) => padTop + chartH - ((val - minVal) / valRange) * chartH;
+                const getX = (idx) => padLeft + (idx / Math.max(1, total - 1)) * chartW;
 
-                    // 1. 水平微弱時間網格線與左側時間標記
-                    ctx.lineWidth = 1;
+                // 1. 水平微弱損益網格線與右側 Y 軸刻度
+                ctx.lineWidth = 1;
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+                ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+                ctx.textAlign = 'left';
+
+                const gridSteps = 6;
+                for (let i = 0; i <= gridSteps; i++) {{
+                    const curVal = minVal + (valRange / gridSteps) * i;
+                    const y = getY(curVal);
+
+                    ctx.beginPath();
+                    ctx.moveTo(padLeft, y);
+                    ctx.lineTo(padLeft + chartW, y);
+                    ctx.stroke();
+
+                    const sign = (curVal >= 0 && this.mode === 'PNL') ? '+' : '';
+                    const label = `${{sign}}${{Math.round(curVal).toLocaleString('zh-TW')}} TWD`;
+                    ctx.fillStyle = (curVal > 0) ? '#26a69a' : (curVal < 0 ? '#ef5350' : '#8b949e');
+                    ctx.fillText(label, padLeft + chartW + 8, y + 4);
+                }}
+
+                // 2. 垂直微弱時間網格線與底部 X 軸時間刻度
+                ctx.textAlign = 'center';
+                ctx.fillStyle = '#8b949e';
+                const timeSteps = 8;
+                for (let i = 0; i <= timeSteps; i++) {{
+                    const idx = Math.min(total - 1, Math.round((total - 1) * (i / timeSteps)));
+                    const x = getX(idx);
+
+                    ctx.save();
                     ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
-                    ctx.fillStyle = '#787b86';
-                    ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
-                    ctx.textAlign = 'right';
+                    ctx.beginPath();
+                    ctx.moveTo(x, padTop);
+                    ctx.lineTo(x, padTop + chartH);
+                    ctx.stroke();
+                    ctx.restore();
 
-                    const timeSteps = 6;
-                    for (let i = 0; i <= timeSteps; i++) {{
-                        const idx = Math.min(total - 1, Math.round((total - 1) * (i / timeSteps)));
-                        const y = getY(idx);
+                    const dtStr = this.alignedPoints[idx].datetime || '';
+                    const shortDt = dtStr.length >= 16 ? dtStr.substring(5, 16) : dtStr;
+                    ctx.fillText(shortDt, x, padTop + chartH + 18);
+                }}
 
-                        ctx.beginPath();
-                        ctx.moveTo(padLeft, y);
-                        ctx.lineTo(padLeft + chartW, y);
-                        ctx.stroke();
-
-                        const dtStr = this.alignedPoints[idx].datetime || '';
-                        const shortDt = dtStr.length >= 16 ? dtStr.substring(5, 16) : dtStr;
-                        ctx.fillText(shortDt, padLeft - 8, y + 3);
-                    }}
-
-                    // 2. 垂直微弱損益網格線與底部 X 軸損益刻度
-                    ctx.textAlign = 'center';
-                    const pnlSteps = 6;
-                    for (let i = 0; i <= pnlSteps; i++) {{
-                        const curVal = minVal + (valRange / pnlSteps) * i;
-                        const x = getX(curVal);
-
-                        ctx.beginPath();
-                        ctx.moveTo(x, padTop);
-                        ctx.lineTo(x, padTop + chartH);
-                        ctx.stroke();
-
-                        const sign = (curVal >= 0 && this.mode === 'PNL') ? '+' : '';
-                        const label = `${{sign}}${{curVal.toLocaleString('zh-TW', {{maximumFractionDigits: 0}})}}`;
-                        ctx.fillText(label, x, padTop + chartH + 18);
-                    }}
-
-                    // 3. 0 軸 (或期初資金線) 垂直基準線
-                    const baseVal = this.mode === 'PNL' ? 0 : 105150;
-                    const baseX = getX(baseVal);
+                // 3. 0 軸水平基準線 (或期初資金基準線)
+                const baseVal = this.mode === 'PNL' ? 0 : 105150;
+                if (baseVal >= minVal && baseVal <= maxVal) {{
+                    const baseY = getY(baseVal);
                     ctx.save();
                     ctx.setLineDash([4, 4]);
                     ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
                     ctx.lineWidth = 1.5;
                     ctx.beginPath();
-                    ctx.moveTo(baseX, padTop);
-                    ctx.lineTo(baseX, padTop + chartH);
+                    ctx.moveTo(padLeft, baseY);
+                    ctx.lineTo(padLeft + chartW, baseY);
                     ctx.stroke();
 
                     ctx.fillStyle = '#ffffff';
                     ctx.font = '10px sans-serif';
-                    ctx.textAlign = 'center';
-                    ctx.fillText('0 軸基準', baseX, padTop - 8);
-                    ctx.restore();
-
-                    // 4. 繪製三條策略曲線 (由頂部時間 0 向下鋪開)
-                    seriesConfigs.forEach(sc => {{
-                        if (!this.visibleSeries[sc.key]) return;
-
-                        ctx.save();
-                        ctx.lineWidth = 2.4;
-                        ctx.strokeStyle = sc.color;
-                        ctx.beginPath();
-
-                        for (let i = 0; i < total; i++) {{
-                            const x = getX(this.alignedPoints[i][sc.key][compKey]);
-                            const y = getY(i);
-                            if (i === 0) ctx.moveTo(x, y);
-                            else ctx.lineTo(x, y);
-                        }}
-                        ctx.stroke();
-                        ctx.restore();
-                    }});
-
-                    // 5. 十字準星 (跟隨滑鼠 Y 軸時間位置)
-                    if (this.hoverIndex >= 0 && this.hoverIndex < total) {{
-                        const hy = getY(this.hoverIndex);
-                        ctx.save();
-                        ctx.setLineDash([3, 3]);
-                        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-                        ctx.beginPath();
-                        ctx.moveTo(padLeft, hy);
-                        ctx.lineTo(padLeft + chartW, hy);
-                        ctx.stroke();
-                        ctx.restore();
-
-                        // 各策略圓點
-                        seriesConfigs.forEach(sc => {{
-                            if (!this.visibleSeries[sc.key]) return;
-                            const hx = getX(this.alignedPoints[this.hoverIndex][sc.key][compKey]);
-                            ctx.fillStyle = sc.color;
-                            ctx.beginPath();
-                            ctx.arc(hx, hy, 4.5, 0, Math.PI * 2);
-                            ctx.fill();
-                            ctx.strokeStyle = '#ffffff';
-                            ctx.lineWidth = 1.5;
-                            ctx.stroke();
-                        }});
-                    }}
-                }}
-                // ==============================================================
-                // 佈局模式 B：【橫軸 X = 時間推進 ｜ 縱軸 Y = 損益/淨值】 (備用翻轉模式)
-                // ==============================================================
-                else {{
-                    const padTop = 20;
-                    const padBottom = 26;
-                    const padLeft = 20;
-                    const padRight = 75;
-                    const chartW = w - padLeft - padRight;
-                    const chartH = h - padTop - padBottom;
-
-                    this.layout = {{
-                        padTop, padBottom, padLeft, padRight,
-                        chartWidth: chartW,
-                        chartHeight: chartH
-                    }};
-
-                    const getY = (val) => padTop + chartH - ((val - minVal) / valRange) * chartH;
-                    const getX = (idx) => padLeft + (idx / Math.max(1, total - 1)) * chartW;
-
-                    // 網格與 Y 刻度
-                    ctx.lineWidth = 1;
-                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
-                    ctx.fillStyle = '#787b86';
-                    ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
                     ctx.textAlign = 'left';
+                    ctx.fillText(this.mode === 'PNL' ? '0 基準線' : '期初資金 (105,150 TWD)', padLeft + 6, baseY - 6);
+                    ctx.restore();
+                }}
 
-                    const gridSteps = 5;
-                    for (let i = 0; i <= gridSteps; i++) {{
-                        const curVal = minVal + (valRange / gridSteps) * i;
-                        const y = getY(curVal);
+                // 4. 繪製三條策略曲線 (由左向右隨時間時序推進)
+                seriesConfigs.forEach(sc => {{
+                    if (!this.visibleSeries[sc.key]) return;
 
-                        ctx.beginPath();
-                        ctx.moveTo(padLeft, y);
-                        ctx.lineTo(padLeft + chartW, y);
-                        ctx.stroke();
-
-                        const sign = (curVal >= 0 && this.mode === 'PNL') ? '+' : '';
-                        const label = `${{sign}}${{curVal.toLocaleString('zh-TW', {{maximumFractionDigits: 0}})}}`;
-                        ctx.fillText(label, padLeft + chartW + 8, y + 3);
-                    }}
-
-                    // 0 軸水平線
-                    const baseVal = this.mode === 'PNL' ? 0 : 105150;
-                    const baseY = getY(baseVal);
                     ctx.save();
-                    ctx.setLineDash([4, 4]);
-                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+                    ctx.lineWidth = 2.4;
+                    ctx.strokeStyle = sc.color;
                     ctx.beginPath();
-                    ctx.moveTo(padLeft, baseY);
-                    ctx.lineTo(padLeft + chartW, baseY);
+
+                    for (let i = 0; i < total; i++) {{
+                        const x = getX(i);
+                        const y = getY(this.alignedPoints[i][sc.key][compKey]);
+                        if (i === 0) ctx.moveTo(x, y);
+                        else ctx.lineTo(x, y);
+                    }}
+                    ctx.stroke();
+                    ctx.restore();
+                }});
+
+                // 5. 十字準星 (跟隨滑鼠 X 軸時間時序位置)
+                if (this.hoverIndex >= 0 && this.hoverIndex < total) {{
+                    const hx = getX(this.hoverIndex);
+                    ctx.save();
+                    ctx.setLineDash([3, 3]);
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                    ctx.beginPath();
+                    ctx.moveTo(hx, padTop);
+                    ctx.lineTo(hx, padTop + chartH);
                     ctx.stroke();
                     ctx.restore();
 
-                    // 三條曲線
+                    // 各策略圓點標記
                     seriesConfigs.forEach(sc => {{
                         if (!this.visibleSeries[sc.key]) return;
-
-                        ctx.save();
-                        ctx.lineWidth = 2.2;
-                        ctx.strokeStyle = sc.color;
+                        const hy = getY(this.alignedPoints[this.hoverIndex][sc.key][compKey]);
+                        ctx.fillStyle = sc.color;
                         ctx.beginPath();
-
-                        for (let i = 0; i < total; i++) {{
-                            const x = getX(i);
-                            const y = getY(this.alignedPoints[i][sc.key][compKey]);
-                            if (i === 0) ctx.moveTo(x, y);
-                            else ctx.lineTo(x, y);
-                        }}
+                        ctx.arc(hx, hy, 4.5, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.lineWidth = 1.5;
                         ctx.stroke();
-                        ctx.restore();
                     }});
-
-                    // 十字準星
-                    if (this.hoverIndex >= 0 && this.hoverIndex < total) {{
-                        const hx = getX(this.hoverIndex);
-                        ctx.save();
-                        ctx.setLineDash([3, 3]);
-                        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-                        ctx.beginPath();
-                        ctx.moveTo(hx, padTop);
-                        ctx.lineTo(hx, padTop + chartH);
-                        ctx.stroke();
-                        ctx.restore();
-
-                        seriesConfigs.forEach(sc => {{
-                            if (!this.visibleSeries[sc.key]) return;
-                            const hy = getY(this.alignedPoints[this.hoverIndex][sc.key][compKey]);
-                            ctx.fillStyle = sc.color;
-                            ctx.beginPath();
-                            ctx.arc(hx, hy, 4.5, 0, Math.PI * 2);
-                            ctx.fill();
-                            ctx.strokeStyle = '#ffffff';
-                            ctx.lineWidth = 1.5;
-                            ctx.stroke();
-                        }});
-                    }}
                 }}
             }}
         }}
@@ -2942,6 +3425,760 @@ def build_html_content(
             }}, 100);
         }}
 
+        // ==============================================================
+        // 核心三：前端高解析度即時回測引擎 (In-Browser Backtest Engine)
+        // 100% 對齊後端 Python BacktestEngine 狀態機撮合邏輯
+        // ==============================================================
+        function calculateWilderRma(series, length) {{
+            const n = series.length;
+            const rma = new Array(n).fill(NaN);
+            if (n < length) return rma;
+            let sum = 0;
+            for (let i = 0; i < length; i++) sum += series[i];
+            rma[length - 1] = sum / length;
+            const alpha = 1.0 / length;
+            for (let i = length; i < n; i++) {{
+                rma[i] = alpha * series[i] + (1.0 - alpha) * rma[i - 1];
+            }}
+            return rma;
+        }}
+
+        function runFastBacktest(bars, config) {{
+            const n = bars.length;
+            const opens = bars.map(b => Number(b.open));
+            const highs = bars.map(b => Number(b.high));
+            const lows = bars.map(b => Number(b.low));
+            const closes = bars.map(b => Number(b.close));
+            const times = bars.map(b => Number(b.time));
+            const datetimes = bars.map(b => b.datetime);
+
+            // 1. 布林通道 (SMA + ddof=0 StdDev)
+            const bbLen = Number(config.bb_length) || 30;
+            const bbMult = Number(config.bb_mult) || 1.75;
+            const pullbackRatio = Number(config.pullback_ratio) || 0.25;
+            const bbUpper = new Array(n).fill(NaN);
+            const bbLower = new Array(n).fill(NaN);
+
+            for (let i = bbLen - 1; i < n; i++) {{
+                let sum = 0;
+                for (let j = i - bbLen + 1; j <= i; j++) sum += closes[j];
+                const mean = sum / bbLen;
+                let varSum = 0;
+                for (let j = i - bbLen + 1; j <= i; j++) varSum += Math.pow(closes[j] - mean, 2);
+                const std = Math.sqrt(varSum / bbLen);
+                bbUpper[i] = mean + bbMult * std;
+                bbLower[i] = mean - bbMult * std;
+            }}
+
+            // 2. True Range 與 ATR
+            const tr = new Array(n).fill(NaN);
+            tr[0] = highs[0] - lows[0];
+            for (let i = 1; i < n; i++) {{
+                const tr1 = highs[i] - lows[i];
+                const tr2 = Math.abs(highs[i] - closes[i - 1]);
+                const tr3 = Math.abs(lows[i] - closes[i - 1]);
+                tr[i] = Math.max(tr1, tr2, tr3);
+            }}
+            const atrLen = Number(config.atr_length) || 14;
+            const atrVal = calculateWilderRma(tr, atrLen);
+
+            // ATR Signal (MA of ATR)
+            const atrSigLen = Number(config.atr_sig_length) || 5;
+            const atrSig = new Array(n).fill(NaN);
+            for (let i = atrSigLen - 1; i < n; i++) {{
+                let sum = 0;
+                let count = 0;
+                for (let j = i - atrSigLen + 1; j <= i; j++) {{
+                    if (!isNaN(atrVal[j])) {{
+                        sum += atrVal[j];
+                        count++;
+                    }}
+                }}
+                if (count === atrSigLen) atrSig[i] = sum / atrSigLen;
+            }}
+
+            // 3. 唐奇安通道 (shift 1)
+            const donchianLen = Number(config.donchian_length) || 4;
+            const donchianHigh = new Array(n).fill(NaN);
+            const donchianLow = new Array(n).fill(NaN);
+            for (let i = donchianLen; i < n; i++) {{
+                let maxH = -Infinity;
+                let minL = Infinity;
+                for (let j = i - donchianLen; j < i; j++) {{
+                    if (highs[j] > maxH) maxH = highs[j];
+                    if (lows[j] < minL) minL = lows[j];
+                }}
+                donchianHigh[i] = maxH;
+                donchianLow[i] = minL;
+            }}
+
+            // 4. 超級趨勢線
+            const stLen = Number(config.supertrend_length) || 14;
+            const stMult = Number(config.supertrend_multiplier) || 2.0;
+            const stVal = new Array(n).fill(NaN);
+            const stDir = new Array(n).fill(1);
+            let prevUpper = 0, prevLower = 0, direction = 1;
+
+            for (let i = 1; i < n; i++) {{
+                if (isNaN(atrVal[i]) || atrVal[i] <= 0) continue;
+                const median = (highs[i] + lows[i]) / 2.0;
+                const basicUpper = median + stMult * atrVal[i];
+                const basicLower = median - stMult * atrVal[i];
+
+                let finalUpper, finalLower;
+                if (i === 1) {{
+                    finalUpper = basicUpper;
+                    finalLower = basicLower;
+                }} else {{
+                    finalUpper = (basicUpper < prevUpper || closes[i - 1] > prevUpper) ? basicUpper : prevUpper;
+                    finalLower = (basicLower > prevLower || closes[i - 1] < prevLower) ? basicLower : prevLower;
+                }}
+
+                let curSt;
+                if (direction === 1) {{
+                    if (closes[i] < finalLower) {{
+                        direction = -1;
+                        curSt = finalUpper;
+                    }} else {{
+                        curSt = finalLower;
+                    }}
+                }} else {{
+                    if (closes[i] > finalUpper) {{
+                        direction = 1;
+                        curSt = finalLower;
+                    }} else {{
+                        curSt = finalUpper;
+                    }}
+                }}
+                stVal[i] = curSt;
+                stDir[i] = direction;
+                prevUpper = finalUpper;
+                prevLower = finalLower;
+            }}
+
+            // 5. 撮合回測狀態機
+            const initialCap = Number(config.initial_capital) || 105150.0;
+            const pointValue = 10.0;
+            const marginReq = 35050.0;
+            const maxLeverage = Number(config.max_leverage) || 7.0;
+            const commissionPerOrder = Number(config.commission) || 18.0;
+            const taxRate = 0.00002;
+            const slippage = Number(config.slippage) || 0.0;
+            const exitMode = config.exit_mode || 'donchian';
+
+            let equity = initialCap;
+            let posSide = 'NONE';
+            let posQty = 0;
+            let posEntryPrice = 0;
+            let posEntryTime = '';
+            let posSlPrice = 0;
+            let posEntryIdx = 0;
+
+            let pendingSignalSide = 'NONE';
+            let signalBarIdx = -1;
+            let signalBarClose = 0;
+            let signalBarQ1 = 0;
+            let signalBarExtreme = 0;
+
+            let entryReadySide = 'NONE';
+            let entrySlPrice = 0;
+
+            const trades = [];
+            const equityCurve = [];
+            let tradeCounter = 0;
+            let runningCumPnl = 0;
+
+            function isThirdWednesday(tsStr) {{
+                if (!tsStr) return false;
+                const d = new Date(tsStr);
+                if (isNaN(d.getTime())) return false;
+                if (d.getDay() !== 3) return false;
+                const day = d.getDate();
+                if (day < 15 || day > 21) return false;
+                const hour = d.getHours();
+                const min = d.getMinutes();
+                return (hour === 13 && min === 0);
+            }}
+
+            for (let i = 1; i < n; i++) {{
+                const curOpen = opens[i];
+                const curHigh = highs[i];
+                const curLow = lows[i];
+                const curClose = closes[i];
+                const curTimeStr = datetimes[i];
+                const curTs = times[i];
+
+                // A. 進場執行 (Bar 3)
+                if (entryReadySide !== 'NONE' && posSide === 'NONE') {{
+                    const rawCapQty = Math.floor(equity / marginReq);
+                    const rawLevQty = Math.floor((equity * maxLeverage) / marginReq);
+                    const safeQty = Math.max(1, Math.min(rawCapQty, rawLevQty));
+
+                    if (safeQty >= 1) {{
+                        const fillPrice = (entryReadySide === 'LONG') ? (curOpen + slippage) : (curOpen - slippage);
+                        posSide = entryReadySide;
+                        posQty = safeQty;
+                        posEntryPrice = fillPrice;
+                        posEntryTime = curTimeStr;
+                        posSlPrice = entrySlPrice;
+                        posEntryIdx = i;
+                    }}
+                    entryReadySide = 'NONE';
+                }}
+
+                // B. 出場檢核
+                if (posSide !== 'NONE') {{
+                    let exitReason = null;
+                    let rawExitPrice = curClose;
+
+                    if (isThirdWednesday(curTimeStr)) {{
+                        exitReason = 'ROLLOVER_SETTLEMENT';
+                        rawExitPrice = curClose;
+                    }} else if (posSide === 'LONG' && curLow <= posSlPrice) {{
+                        exitReason = 'STOP_LOSS';
+                        rawExitPrice = Math.min(curOpen, posSlPrice);
+                    }} else if (posSide === 'SHORT' && curHigh >= posSlPrice) {{
+                        exitReason = 'STOP_LOSS';
+                        rawExitPrice = Math.max(curOpen, posSlPrice);
+                    }} else if (exitMode === 'donchian') {{
+                        if (posSide === 'LONG' && !isNaN(donchianLow[i]) && curClose < donchianLow[i]) {{
+                            exitReason = 'DONCHIAN_EXIT';
+                            rawExitPrice = curClose;
+                        }} else if (posSide === 'SHORT' && !isNaN(donchianHigh[i]) && curClose > donchianHigh[i]) {{
+                            exitReason = 'DONCHIAN_EXIT';
+                            rawExitPrice = curClose;
+                        }}
+                    }} else if (exitMode === 'supertrend') {{
+                        if (posSide === 'LONG' && (stDir[i] === -1 || curClose < stVal[i])) {{
+                            exitReason = 'SUPERTREND_EXIT';
+                            rawExitPrice = curClose;
+                        }} else if (posSide === 'SHORT' && (stDir[i] === 1 || curClose > stVal[i])) {{
+                            exitReason = 'SUPERTREND_EXIT';
+                            rawExitPrice = curClose;
+                        }}
+                    }} else if (exitMode === 'atr') {{
+                        if (!isNaN(atrVal[i]) && !isNaN(atrSig[i]) && !isNaN(atrVal[i - 1]) && !isNaN(atrSig[i - 1])) {{
+                            const prevAbove = atrVal[i - 1] >= atrSig[i - 1];
+                            const curBelow = atrVal[i] < atrSig[i];
+                            if (prevAbove && curBelow) {{
+                                exitReason = 'ATR_TAKE_PROFIT';
+                                rawExitPrice = curClose;
+                            }}
+                        }}
+                    }}
+
+                    if (exitReason !== null) {{
+                        tradeCounter++;
+                        const actualExitPrice = (posSide === 'LONG') ? (rawExitPrice - slippage) : (rawExitPrice + slippage);
+                        const grossPnl = (posSide === 'LONG')
+                            ? (actualExitPrice - posEntryPrice) * pointValue * posQty
+                            : (posEntryPrice - actualExitPrice) * pointValue * posQty;
+
+                        const feeTotal = commissionPerOrder * 2.0 * posQty;
+                        const entryNotional = posEntryPrice * pointValue * posQty;
+                        const exitNotional = actualExitPrice * pointValue * posQty;
+                        const taxTotal = Math.round(entryNotional * taxRate) + Math.round(exitNotional * taxRate);
+                        const netPnl = grossPnl - feeTotal - taxTotal;
+                        equity += netPnl;
+                        runningCumPnl += netPnl;
+
+                        let exitReasonZh = '結算';
+                        if (exitReason === 'STOP_LOSS') exitReasonZh = '停損';
+                        else if (exitReason === 'ATR_TAKE_PROFIT') exitReasonZh = 'ATR停利';
+                        else if (exitReason === 'DONCHIAN_EXIT') exitReasonZh = '唐奇安出場';
+                        else if (exitReason === 'SUPERTREND_EXIT') exitReasonZh = '超級趨勢出場';
+
+                        trades.push({{
+                            trade_id: tradeCounter,
+                            side: posSide,
+                            entry_time: posEntryTime,
+                            entry_price: posEntryPrice,
+                            exit_time: curTimeStr,
+                            exit_price: actualExitPrice,
+                            qty: posQty,
+                            exit_reason: exitReasonZh,
+                            costs: feeTotal + taxTotal,
+                            net_pnl: netPnl,
+                            cum_pnl: Math.round(runningCumPnl * 100) / 100,
+                            return_pct: Math.round(((actualExitPrice - posEntryPrice) / posEntryPrice * (posSide === 'LONG' ? 1 : -1) * 100) * 100) / 100,
+                            equity_after: Math.round(equity * 100) / 100,
+                            entry_ts: Math.floor(new Date(posEntryTime).getTime() / 1000),
+                            exit_ts: Math.floor(new Date(curTimeStr).getTime() / 1000)
+                        }});
+
+                        posSide = 'NONE';
+                        posQty = 0;
+                    }}
+                }}
+
+                // C. 第二根確認棒與第一根訊號棒判斷
+                if (posSide === 'NONE' && entryReadySide === 'NONE') {{
+                    if (pendingSignalSide !== 'NONE' && (i - 1 === signalBarIdx)) {{
+                        if (pendingSignalSide === 'LONG') {{
+                            const isConfirmed = (curClose <= signalBarClose) && (curClose >= signalBarQ1);
+                            if (isConfirmed) {{
+                                entryReadySide = 'LONG';
+                                entrySlPrice = signalBarExtreme;
+                            }}
+                        }} else if (pendingSignalSide === 'SHORT') {{
+                            const isConfirmed = (curClose >= signalBarClose) && (curClose <= signalBarQ1);
+                            if (isConfirmed) {{
+                                entryReadySide = 'SHORT';
+                                entrySlPrice = signalBarExtreme;
+                            }}
+                        }}
+                        pendingSignalSide = 'NONE';
+                    }}
+
+                    if (!isNaN(bbUpper[i]) && !isNaN(bbLower[i])) {{
+                        if (curClose > bbUpper[i] && curClose > curOpen) {{
+                            const body = curClose - curOpen;
+                            pendingSignalSide = 'LONG';
+                            signalBarIdx = i;
+                            signalBarClose = curClose;
+                            signalBarQ1 = curClose - (body * pullbackRatio);
+                            signalBarExtreme = curLow;
+                        }} else if (curClose < bbLower[i] && curClose < curOpen) {{
+                            const body = curOpen - curClose;
+                            pendingSignalSide = 'SHORT';
+                            signalBarIdx = i;
+                            signalBarClose = curClose;
+                            signalBarQ1 = curClose + (body * pullbackRatio);
+                            signalBarExtreme = curHigh;
+                        }}
+                    }}
+                }}
+
+                // D. 記錄每根 K 線浮動淨值
+                let curEq = equity;
+                if (posSide !== 'NONE') {{
+                    const unrealized = (posSide === 'LONG')
+                        ? (curClose - posEntryPrice) * pointValue * posQty
+                        : (posEntryPrice - curClose) * pointValue * posQty;
+                    curEq += unrealized;
+                }}
+                equityCurve.push({{
+                    time: curTs,
+                    value: Math.round((curEq - initialCap) * 100) / 100,
+                    equity: Math.round(curEq * 100) / 100,
+                    close: curClose,
+                    in_position: (posSide !== 'NONE')
+                }});
+            }}
+
+            // 6. 量化指標彙總
+            const wins = trades.filter(t => t.net_pnl > 0).map(t => t.net_pnl);
+            const losses = trades.filter(t => t.net_pnl < 0).map(t => t.net_pnl);
+            const totalNetProfit = equity - initialCap;
+            const winRatePct = trades.length > 0 ? (wins.length / trades.length) * 100 : 0;
+            const grossWin = wins.reduce((a, b) => a + b, 0);
+            const grossLoss = Math.abs(losses.reduce((a, b) => a + b, 0));
+            const profitFactor = grossLoss > 0 ? (grossWin / grossLoss) : (grossWin > 0 ? 99.0 : 0);
+            const avgWin = wins.length > 0 ? (grossWin / wins.length) : 0;
+            const avgLoss = losses.length > 0 ? (grossLoss / losses.length) : 0;
+            const payoff = avgLoss > 0 ? (avgWin / avgLoss) : 0;
+
+            // 計算 MDD
+            let peak = -Infinity;
+            let maxDd = 0;
+            let maxDdPct = 0;
+            for (const eq of equityCurve) {{
+                if (eq.equity > peak) peak = eq.equity;
+                const dd = peak - eq.equity;
+                const ddPct = peak > 0 ? (dd / peak) * 100 : 0;
+                if (dd > maxDd) maxDd = dd;
+                if (ddPct > maxDdPct) maxDdPct = ddPct;
+            }}
+
+            const netPnlSign = totalNetProfit >= 0 ? '+' : '';
+            const retPct = (totalNetProfit / initialCap) * 100;
+            const retPctSign = retPct >= 0 ? '+' : '';
+
+            const metrics = {{
+                strategyName: config.strategy_name || '自訂策略',
+                totalNetProfit: Math.round(totalNetProfit * 100) / 100,
+                totalNetProfitStr: `${{netPnlSign}}${{Math.round(totalNetProfit).toLocaleString('zh-TW')}}`,
+                totalReturnPct: Math.round(retPct * 100) / 100,
+                totalReturnPctStr: `${{retPctSign}}${{retPct.toFixed(2)}}%`,
+                isProfit: totalNetProfit >= 0,
+                maxDrawdown: Math.round(maxDd * 100) / 100,
+                maxDrawdownStr: `-${{Math.round(maxDd).toLocaleString('zh-TW')}}`,
+                maxDrawdownPct: Math.round(maxDdPct * 100) / 100,
+                maxDrawdownPctStr: `-${{maxDdPct.toFixed(2)}}%`,
+                winRatePct: Math.round(winRatePct * 100) / 100,
+                winRateStr: `${{winRatePct.toFixed(2)}}%`,
+                totalTrades: trades.length,
+                winningTrades: wins.length,
+                losingTrades: losses.length,
+                tradesRatioStr: `${{wins.length}}/${{trades.length}}`,
+                profitFactor: Math.round(profitFactor * 1000) / 1000,
+                profitFactorStr: profitFactor.toFixed(3),
+                initialCapital: initialCap,
+                initialCapitalStr: Math.round(initialCap).toLocaleString('zh-TW'),
+                finalEquity: Math.round(equity * 100) / 100,
+                finalEquityStr: Math.round(equity).toLocaleString('zh-TW'),
+                avgWin: Math.round(avgWin),
+                avgWinStr: `+${{Math.round(avgWin).toLocaleString('zh-TW')}}`,
+                avgLoss: Math.round(avgLoss),
+                avgLossStr: `-${{Math.round(avgLoss).toLocaleString('zh-TW')}}`,
+                payoffRatio: Math.round(payoff * 100) / 100,
+                payoffRatioStr: payoff.toFixed(2)
+            }};
+
+            // 7. 產生買賣 Markers
+            const markers = [];
+            for (const t of trades) {{
+                const isLong = (t.side === 'LONG');
+                markers.push({{
+                    rawTime: t.entry_ts,
+                    time: t.entry_ts,
+                    position: isLong ? 'belowBar' : 'aboveBar',
+                    color: isLong ? '#089981' : '#f23645',
+                    shape: isLong ? 'arrowUp' : 'arrowDown',
+                    text: isLong ? `買進 ${{t.qty}}口` : `放空 ${{t.qty}}口`,
+                    tradeId: t.trade_id,
+                    type: 'entry',
+                    side: t.side,
+                    price: t.entry_price,
+                    qty: t.qty,
+                    timeStr: t.entry_time
+                }});
+
+                let markerColor = '#8b949e';
+                if (t.exit_reason === '停損') markerColor = '#f23645';
+                else if (t.exit_reason === 'ATR停利') markerColor = '#089981';
+                else if (t.exit_reason === '唐奇安出場') markerColor = '#00e5ff';
+                else if (t.exit_reason === '超級趨勢出場') markerColor = '#f0b90b';
+
+                const pnlSign = t.net_pnl >= 0 ? '+' : '';
+                markers.push({{
+                    rawTime: t.exit_ts,
+                    time: t.exit_ts,
+                    position: isLong ? 'aboveBar' : 'belowBar',
+                    color: markerColor,
+                    shape: 'circle',
+                    text: `${{t.exit_reason}} (${{pnlSign}}${{Math.round(t.net_pnl).toLocaleString('zh-TW')}})`,
+                    tradeId: t.trade_id,
+                    type: 'exit',
+                    side: t.side,
+                    price: t.exit_price,
+                    qty: t.qty,
+                    pnl: t.net_pnl,
+                    reason: t.exit_reason,
+                    timeStr: t.exit_time
+                }});
+            }}
+            markers.sort((a, b) => (a.rawTime !== b.rawTime ? a.rawTime - b.rawTime : (a.type === 'entry' ? -1 : 1)));
+
+            return {{
+                metrics,
+                trades,
+                cumulative_pnl: equityCurve,
+                markers
+            }};
+        }}
+
+        // 策略參數集中配置庫
+        const strategyConfigs = {{
+            donchian: {{
+                strategy_name: '布林_唐奇安',
+                exit_mode: 'donchian',
+                bb_length: 30,
+                bb_mult: 1.75,
+                pullback_ratio: 0.25,
+                donchian_length: 4,
+                max_leverage: 7.0,
+                commission: 18.0,
+                slippage: 0.0
+            }},
+            supertrend: {{
+                strategy_name: '布林_超級趨勢',
+                exit_mode: 'supertrend',
+                bb_length: 30,
+                bb_mult: 1.75,
+                pullback_ratio: 0.25,
+                supertrend_length: 14,
+                supertrend_multiplier: 2.0,
+                max_leverage: 7.0,
+                commission: 18.0,
+                slippage: 0.0
+            }},
+            atr: {{
+                strategy_name: '布林_ATR基準',
+                exit_mode: 'atr',
+                bb_length: 30,
+                bb_mult: 1.75,
+                pullback_ratio: 0.25,
+                atr_length: 14,
+                atr_sig_length: 5,
+                max_leverage: 7.0,
+                commission: 18.0,
+                slippage: 0.0
+            }}
+        }};
+        const defaultStrategyConfigs = JSON.parse(JSON.stringify(strategyConfigs));
+        let activeModalStrat = 'donchian';
+
+        // 刷新頂部多策略橫向 KPI 矩陣卡片
+        function updateKpiCard(stratKey) {{
+            const strat = STRATEGIES_DATA[stratKey];
+            if (!strat) return;
+            const m = strat.metrics;
+            const pnlEl = document.getElementById(`kpi-${{stratKey}}-pnl`);
+            const winrateEl = document.getElementById(`kpi-${{stratKey}}-winrate`);
+            const pfEl = document.getElementById(`kpi-${{stratKey}}-pf`);
+            const avgwinEl = document.getElementById(`kpi-${{stratKey}}-avgwin`);
+            const mddEl = document.getElementById(`kpi-${{stratKey}}-mdd`);
+            const tradesEl = document.getElementById(`kpi-${{stratKey}}-trades`);
+            const avglossEl = document.getElementById(`kpi-${{stratKey}}-avgloss`);
+            const payoffEl = document.getElementById(`kpi-${{stratKey}}-payoff`);
+
+            if (pnlEl) {{
+                pnlEl.textContent = m.totalNetProfitStr;
+                pnlEl.className = `kpi-sub-val ${{m.isProfit ? 'win' : 'loss'}}`;
+            }}
+            if (winrateEl) winrateEl.textContent = m.winRateStr;
+            if (pfEl) pfEl.textContent = m.profitFactorStr;
+            if (avgwinEl) avgwinEl.textContent = m.avgWinStr;
+            if (mddEl) mddEl.textContent = m.maxDrawdownStr;
+            if (tradesEl) tradesEl.textContent = `${{m.totalTrades}} 筆`;
+            if (avglossEl) avglossEl.textContent = m.avgLossStr;
+            if (payoffEl) payoffEl.textContent = m.payoffRatioStr;
+        }}
+
+        // 執行動態回測並動態連動刷新所有組件
+        function executeDynamicBacktest(stratKey, customConfig) {{
+            const bars5m = KLINE_DATA['5m'] || [];
+            if (bars5m.length === 0) return;
+
+            const t0 = performance.now();
+            const res = runFastBacktest(bars5m, customConfig);
+            const t1 = performance.now();
+            const elapsedMs = Math.round((t1 - t0) * 10) / 10;
+
+            // 寫回全域資料庫
+            STRATEGIES_DATA[stratKey].metrics = res.metrics;
+            STRATEGIES_DATA[stratKey].trades = res.trades;
+            STRATEGIES_DATA[stratKey].cumulative_pnl = res.cumulative_pnl;
+            STRATEGIES_DATA[stratKey].markers = res.markers;
+
+            // 更新多策略 KPI 卡片
+            updateKpiCard(stratKey);
+
+            // 更新多策略淨值圖
+            if (multiCompareChart) {{
+                multiCompareChart.initData();
+                multiCompareChart.draw();
+            }}
+
+            // 若目前活躍策略為該策略，同步更新所有視圖
+            if (currentStrategyKey === stratKey) {{
+                renderKeyMetrics();
+                renderTradesTable();
+                if (tradeEquityChart) {{
+                    tradeEquityChart.setTrades();
+                    tradeEquityChart.draw();
+                }}
+                updateBaselineData();
+                if (showMarkers) {{
+                    const curBars = KLINE_DATA[currentInterval] || [];
+                    applyMarkersToChart(alignMarkersToBars(res.markers, curBars));
+                }}
+            }}
+
+            // 若布林長度或標準差有異動，動態更新主圖布林通道
+            if (customConfig.bb_length || customConfig.bb_mult) {{
+                currentBBConfig.length = Number(customConfig.bb_length) || currentBBConfig.length;
+                currentBBConfig.mult = Number(customConfig.bb_mult) || currentBBConfig.mult;
+                updateBollingerBands(KLINE_DATA[currentInterval] || []);
+            }}
+
+            // 更新 Modal 預覽數值
+            updateModalPreviewBox(res.metrics, elapsedMs);
+
+            showToast(`⚡ 回測完成！耗時 ${{elapsedMs}} ms ｜ ${{STRATEGIES_DATA[stratKey].displayName}} 淨利: ${{res.metrics.totalNetProfitStr}} TWD ｜ 勝率: ${{res.metrics.winRateStr}} ｜ PF: ${{res.metrics.profitFactorStr}}`, 'success');
+        }}
+
+        function updateModalPreviewBox(m, elapsedMs) {{
+            const pnlEl = document.getElementById('res-preview-pnl');
+            const winrateEl = document.getElementById('res-preview-winrate');
+            const pfEl = document.getElementById('res-preview-pf');
+            const tradesEl = document.getElementById('res-preview-trades');
+            const mddEl = document.getElementById('res-preview-mdd');
+            const payoffEl = document.getElementById('res-preview-payoff');
+            const timeEl = document.getElementById('res-preview-time');
+
+            if (pnlEl) {{
+                pnlEl.textContent = m.totalNetProfitStr;
+                pnlEl.style.color = m.isProfit ? '#00e5ff' : '#ef5350';
+            }}
+            if (winrateEl) winrateEl.textContent = m.winRateStr;
+            if (pfEl) pfEl.textContent = m.profitFactorStr;
+            if (tradesEl) tradesEl.textContent = `${{m.totalTrades}} 筆`;
+            if (mddEl) mddEl.textContent = m.maxDrawdownStr;
+            if (payoffEl) payoffEl.textContent = m.payoffRatioStr;
+            if (timeEl && elapsedMs !== undefined) timeEl.textContent = `⚡ 運算耗時: ${{elapsedMs}} ms`;
+        }}
+
+        // 開啟 Modal 並設定輸入欄位
+        function openParamsModal(stratKey) {{
+            activeModalStrat = stratKey || currentStrategyKey || 'donchian';
+            const modal = document.getElementById('params-modal-overlay');
+            if (!modal) return;
+            modal.classList.add('open');
+
+            // 更新策略標籤
+            document.querySelectorAll('.params-strat-tab').forEach(tab => {{
+                tab.classList.toggle('active', tab.dataset.strat === activeModalStrat);
+            }});
+
+            populateModalInputs(activeModalStrat);
+        }}
+
+        function populateModalInputs(stratKey) {{
+            const cfg = strategyConfigs[stratKey];
+            if (!cfg) return;
+
+            document.getElementById('txt-exit-strat-name').textContent = STRATEGIES_DATA[stratKey].displayName;
+            document.getElementById('res-preview-title').textContent = STRATEGIES_DATA[stratKey].displayName;
+
+            // 切換出場面板
+            document.getElementById('panel-exit-donchian').style.display = (stratKey === 'donchian') ? 'grid' : 'none';
+            document.getElementById('panel-exit-supertrend').style.display = (stratKey === 'supertrend') ? 'grid' : 'none';
+            document.getElementById('panel-exit-atr').style.display = (stratKey === 'atr') ? 'grid' : 'none';
+
+            // 進場欄位
+            setFieldSync('bb-len', cfg.bb_length);
+            setFieldSync('bb-mult', cfg.bb_mult);
+            setFieldSync('pullback', cfg.pullback_ratio);
+
+            // 出場欄位
+            if (stratKey === 'donchian') {{
+                setFieldSync('donchian-len', cfg.donchian_length);
+            }} else if (stratKey === 'supertrend') {{
+                setFieldSync('st-len', cfg.supertrend_length);
+                setFieldSync('st-mult', cfg.supertrend_multiplier);
+            }} else if (stratKey === 'atr') {{
+                setFieldSync('atr-len', cfg.atr_length);
+                setFieldSync('atr-sig', cfg.atr_sig_length);
+            }}
+
+            // 資金欄位
+            setFieldSync('leverage', cfg.max_leverage);
+            document.getElementById('num-commission').value = cfg.commission;
+            document.getElementById('val-badge-commission').textContent = `${{cfg.commission}} 元`;
+            setFieldSync('slippage', cfg.slippage);
+
+            // 預覽當前已存在指標
+            const curM = STRATEGIES_DATA[stratKey].metrics;
+            if (curM) updateModalPreviewBox(curM);
+        }}
+
+        function setFieldSync(idPrefix, val) {{
+            const range = document.getElementById(`range-${{idPrefix}}`);
+            const num = document.getElementById(`num-${{idPrefix}}`);
+            const badge = document.getElementById(`val-badge-${{idPrefix}}`);
+            if (range) range.value = val;
+            if (num) num.value = val;
+            if (badge) {{
+                if (idPrefix === 'pullback') badge.textContent = `${{val}} (${{Math.round(val * 100)}}% K棒)`;
+                else if (idPrefix === 'leverage') badge.textContent = `${{val}}x`;
+                else if (idPrefix === 'slippage') badge.textContent = `${{val}} 點`;
+                else badge.textContent = val;
+            }}
+        }}
+
+        function initParamsModal() {{
+            // 策略標籤切換
+            document.querySelectorAll('.params-strat-tab').forEach(tab => {{
+                tab.addEventListener('click', () => {{
+                    activeModalStrat = tab.dataset.strat;
+                    document.querySelectorAll('.params-strat-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    populateModalInputs(activeModalStrat);
+                }});
+            }});
+
+            // 綁定 Slider 與 Input 雙向連動
+            const fieldKeys = [
+                'bb-len', 'bb-mult', 'pullback',
+                'donchian-len', 'st-len', 'st-mult',
+                'atr-len', 'atr-sig', 'leverage', 'slippage'
+            ];
+
+            fieldKeys.forEach(k => {{
+                const range = document.getElementById(`range-${{k}}`);
+                const num = document.getElementById(`num-${{k}}`);
+                const badge = document.getElementById(`val-badge-${{k}}`);
+
+                if (range && num) {{
+                    range.addEventListener('input', () => {{
+                        num.value = range.value;
+                        if (badge) {{
+                            if (k === 'pullback') badge.textContent = `${{range.value}} (${{Math.round(range.value * 100)}}% K棒)`;
+                            else if (k === 'leverage') badge.textContent = `${{range.value}}x`;
+                            else if (k === 'slippage') badge.textContent = `${{range.value}} 點`;
+                            else badge.textContent = range.value;
+                        }}
+                    }});
+                    num.addEventListener('input', () => {{
+                        range.value = num.value;
+                        if (badge) {{
+                            if (k === 'pullback') badge.textContent = `${{num.value}} (${{Math.round(num.value * 100)}}% K棒)`;
+                            else if (k === 'leverage') badge.textContent = `${{num.value}}x`;
+                            else if (k === 'slippage') badge.textContent = `${{num.value}} 點`;
+                            else badge.textContent = num.value;
+                        }}
+                    }});
+                }}
+            }});
+
+            // 手續費單獨輸入綁定
+            const numComm = document.getElementById('num-commission');
+            if (numComm) {{
+                numComm.addEventListener('input', () => {{
+                    const b = document.getElementById('val-badge-commission');
+                    if (b) b.textContent = `${{numComm.value}} 元`;
+                }});
+            }}
+
+            // 執行回測按鈕
+            if (btnRunBacktest) {{
+                btnRunBacktest.addEventListener('click', () => {{
+                    const cfg = strategyConfigs[activeModalStrat];
+                    cfg.bb_length = Number(document.getElementById('num-bb-len').value);
+                    cfg.bb_mult = Number(document.getElementById('num-bb-mult').value);
+                    cfg.pullback_ratio = Number(document.getElementById('num-pullback').value);
+
+                    if (activeModalStrat === 'donchian') {{
+                        cfg.donchian_length = Number(document.getElementById('num-donchian-len').value);
+                    }} else if (activeModalStrat === 'supertrend') {{
+                        cfg.supertrend_length = Number(document.getElementById('num-st-len').value);
+                        cfg.supertrend_multiplier = Number(document.getElementById('num-st-mult').value);
+                    }} else if (activeModalStrat === 'atr') {{
+                        cfg.atr_length = Number(document.getElementById('num-atr-len').value);
+                        cfg.atr_sig_length = Number(document.getElementById('num-atr-sig').value);
+                    }}
+
+                    cfg.max_leverage = Number(document.getElementById('num-leverage').value);
+                    cfg.commission = Number(document.getElementById('num-commission').value);
+                    cfg.slippage = Number(document.getElementById('num-slippage').value);
+
+                    executeDynamicBacktest(activeModalStrat, cfg);
+                }});
+            }}
+
+            // 重設為初始預設值按鈕
+            if (btnResetParams) {{
+                btnResetParams.addEventListener('click', () => {{
+                    strategyConfigs[activeModalStrat] = JSON.parse(JSON.stringify(defaultStrategyConfigs[activeModalStrat]));
+                    populateModalInputs(activeModalStrat);
+                    executeDynamicBacktest(activeModalStrat, strategyConfigs[activeModalStrat]);
+                    showToast(`已重設 [${{STRATEGIES_DATA[activeModalStrat].displayName}}] 為初始預設參數`, 'info');
+                }});
+            }}
+        }}
+
         // 切換活躍策略
         function switchActiveStrategy(stratKey) {{
             if (!STRATEGIES_DATA[stratKey]) return;
@@ -3017,18 +4254,39 @@ def build_html_content(
                 btnToggleLayout.addEventListener('click', toggleLayoutMode);
             }}
 
-            // 翻轉軸向按鈕
-            const btnFlipAxes = document.getElementById('btn-flip-axes');
-            if (btnFlipAxes) {{
-                btnFlipAxes.addEventListener('click', () => {{
-                    if (multiCompareChart) {{
-                        const curAxis = multiCompareChart.flipAxes();
-                        const isPnlX = (curAxis === 'X_PNL_Y_TIME');
-                        btnFlipAxes.textContent = `🔄 翻轉軸向 (${{isPnlX ? '目前: 橫軸X損益 × 縱軸Y時間' : '目前: 橫軸X時間 × 縱軸Y損益'}})`;
-                        showToast(`已切換軸向為: ${{isPnlX ? '橫軸 X 累積損益 ｜ 縱軸 Y 時間推進' : '橫軸 X 時間時序 ｜ 縱軸 Y 累積損益'}}`, 'success');
+            // 布林通道開關
+            if (btnToggleBb) {{
+                btnToggleBb.addEventListener('click', () => {{
+                    showBollingerBands = !showBollingerBands;
+                    btnToggleBb.classList.toggle('active', showBollingerBands);
+                    if (txtToggleBb) txtToggleBb.textContent = `🎯 布林軌道: ${{showBollingerBands ? '顯示' : '隱藏'}}`;
+                    const bars = KLINE_DATA[currentInterval] || [];
+                    updateBollingerBands(bars);
+                    showToast(`布林通道已${{showBollingerBands ? '開啟顯示' : '隱藏'}}`, 'info');
+                }});
+            }}
+
+            // 策略參數調校 Modal 開啟 / 關閉
+            if (btnOpenParamsModal) {{
+                btnOpenParamsModal.addEventListener('click', () => {{
+                    openParamsModal();
+                }});
+            }}
+            if (btnCloseParamsModal && paramsModalOverlay) {{
+                btnCloseParamsModal.addEventListener('click', () => {{
+                    paramsModalOverlay.classList.remove('open');
+                }});
+            }}
+            if (paramsModalOverlay) {{
+                paramsModalOverlay.addEventListener('click', (e) => {{
+                    if (e.target === paramsModalOverlay) {{
+                        paramsModalOverlay.classList.remove('open');
                     }}
                 }});
             }}
+
+            // 初始化參數調校控制器
+            initParamsModal();
 
             // 頂部策略切換
             document.querySelectorAll('.strat-btn').forEach(btn => {{

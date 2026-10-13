@@ -29,7 +29,9 @@ shioaji.log
 
 # Local Temporary and Shortcut Files
 *.tmp
+*.bak
 *.lnk
 ~$*.xlsx
 ~$*.xls
 *.lock
+archive/temp_edge_profile*/
