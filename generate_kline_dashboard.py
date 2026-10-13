@@ -8,10 +8,16 @@ K 線與多策略回測互動網頁儀表板生成器 (generate_kline_dashboard.
 3. 布林動能突破 (動態 ATR 停利基準)
 
 產出自給自足（Self-contained）、支援離線開啟與 TradingView 暗黑配色的互動式多圖儀表板：
-1. 上圖：高頻 K 線燭柱圖、成交量柱狀圖、以及可隨當前策略切換之進出場交易信號 (Markers)。
-2. 頂部工具列：支援一鍵切換當前活躍策略（唐奇安 / 超級趨勢 / ATR）。
-3. 下圖四大分頁：
-   - ⚔️ 雙策略淨值直觀對比：三策略量化 KPI 矩陣 + 同屏多曲線 Canvas 累計淨值對比圖 (即時十字準星 + 領先者標籤 + 圖例開關)。
+1. 預設啟動【全畫面數據視圖】（Solo Data View）：
+   - 隱藏上方 K 線圖，下方多策略 KPI 矩陣與淨值對比圖佔滿 100% 畫面高。
+   - 頂部工具列提供一鍵展開/收合上方 K 線主圖之切換開關。
+2. 淨值圖預設採用【X/Y 軸相反】佈局：
+   - 橫軸 X = 累積損益 (TWD) / 帳戶淨值 (TWD)（高對比 0 軸垂直基準線）。
+   - 縱軸 Y = 時間時序推進（由上向下延伸鋪開）。
+   - 支援一鍵翻轉軸向（切換橫軸時間 vs 縱軸時間）。
+3. 頂部工具列：支援一鍵切換當前活躍策略（唐奇安 / 超級趨勢 / ATR）。
+4. 下圖四大分頁：
+   - ⚔️ 雙策略淨值直觀對比：三策略量化 KPI 矩陣 + 同屏多曲線 Canvas 累計淨值對比圖。
    - 📊 單策略逐筆淨值圖：固定 Y 軸 (交易次數) × X 軸 (損益 / 淨值) 之 Canvas 圖表。
    - 📈 時間時序走勢：擬真 TradingView 0 軸分界紅綠漸層累計損益走勢圖 (BaselineSeries)。
    - 📋 交易明細清單：完整 100% 對齊 CSV 之逐筆成交稽核表格，支援一鍵點擊定位上圖 K 線。
@@ -348,7 +354,7 @@ def build_html_content(
     standalone_js: str
 ) -> str:
     """
-    建構支援多策略動態切換、多曲線同屏直觀對比、TradingView 暗黑風格的量化儀表板 HTML。
+    建構支援全畫面數據視圖、X/Y 軸相反淨值對比、TradingView 暗黑風格的量化儀表板 HTML。
 
     參數:
         intervals_data (Dict[str, List[Dict[str, Any]]]): 11 種週期的 K 線資料字典。
@@ -525,6 +531,11 @@ def build_html_content(
             color: #089981;
             background: rgba(8, 153, 129, 0.12);
         }}
+        .toggle-btn.mode-active {{
+            border-color: #2962ff;
+            color: #2962ff;
+            background: rgba(41, 98, 255, 0.15);
+        }}
         .reset-btn {{
             background: #1e2230;
             border: 1px solid #2e3448;
@@ -549,9 +560,10 @@ def build_html_content(
             width: 100%;
             height: calc(100vh - 48px);
             overflow: hidden;
+            transition: all 0.2s ease-in-out;
         }}
 
-        /* 上半部：K 線圖容器 (佔約 52%) */
+        /* 上半部：K 線圖容器 (雙圖模式下佔約 52%) */
         .kline-section {{
             flex: 52;
             position: relative;
@@ -563,6 +575,21 @@ def build_html_content(
         #kline-container {{
             width: 100%;
             height: 100%;
+        }}
+
+        /* 全畫面數據視圖 (Solo Data View) 核心樣式：隱藏上方 K 線，下方佔滿 100% */
+        .workspace-split.solo-data-mode .kline-section {{
+            display: none !important;
+        }}
+        .workspace-split.solo-data-mode .performance-section {{
+            flex: 1 1 100% !important;
+            height: 100% !important;
+            min-height: auto;
+        }}
+        .workspace-split.solo-data-mode .multi-canvas-viewport {{
+            flex: 1;
+            height: 100% !important;
+            min-height: 480px;
         }}
 
         /* 左上角即時 OHLC 數據懸浮標籤 */
@@ -615,7 +642,7 @@ def build_html_content(
             font-weight: 700;
         }}
 
-        /* 下半部：策略績效全覽面板 (佔約 48%) */
+        /* 下半部：策略績效全覽面板 (雙圖模式下佔約 48%，全畫面模式佔 100%) */
         .performance-section {{
             flex: 48;
             display: flex;
@@ -774,6 +801,10 @@ def build_html_content(
             color: #ffffff;
             background: #252a3a;
             border-color: #3b4560;
+        }}
+        .perf-tool-btn.highlight {{
+            color: #00e5ff;
+            border-color: rgba(0, 229, 255, 0.4);
         }}
 
         /* 3. 分頁 1: ⚔️ 雙策略淨值直觀對比視圖面板 */
@@ -1064,7 +1095,7 @@ def build_html_content(
             text-align: center;
         }}
 
-        /* 5. 分頁 3: 時間軸累計損益走勢圖容器 */
+        /* 5. 分頁 3: 時間軸累計損益圖表容器 (BaselineSeries) */
         .perf-chart-container-wrapper {{
             flex: 1;
             position: relative;
@@ -1313,6 +1344,10 @@ def build_html_content(
         </div>
 
         <div class="actions-group">
+            <!-- 全畫面純數據視圖 ⇄ 雙圖切換按鈕 -->
+            <button class="toggle-btn mode-active" id="btn-toggle-layout" title="切換 全畫面數據視圖 ⇄ K線雙圖模式">
+                <span id="txt-toggle-layout">🗖 數據全畫面 (作用中)</span>
+            </button>
             <div id="live-status-badge" class="live-badge offline" title="即時行情 WebSocket 串流狀態">
                 <span class="live-indicator-dot"></span>
                 <span id="live-status-text">串流: 離線</span>
@@ -1327,11 +1362,11 @@ def build_html_content(
     <!-- 即時通知容器 -->
     <div class="toast-container" id="toast-container"></div>
 
-    <!-- 雙窗格主工作區 -->
-    <div class="workspace-split">
+    <!-- 主工作區：預設加入 solo-data-mode 類別 (全畫面只有數據部分) -->
+    <div class="workspace-split solo-data-mode" id="workspace-split">
 
-        <!-- 上圖：K 線圖主圖 (包含進出場點位標記) -->
-        <div class="kline-section">
+        <!-- 上圖：K 線圖主圖 (全畫面模式下自動隱藏，點擊按鈕可一鍵展開) -->
+        <div class="kline-section" id="kline-section">
             <div class="ohlc-legend" id="ohlc-legend">
                 <div class="legend-item legend-active-strat" id="legend-strat-tag">布林_唐奇安</div>
                 <div class="legend-item legend-time" id="legend-time">--</div>
@@ -1347,8 +1382,8 @@ def build_html_content(
             <div class="watermark">TMF202610 • MULTI-STRATEGY COMPARISON</div>
         </div>
 
-        <!-- 下半部：策略績效全覽面板 -->
-        <div class="performance-section">
+        <!-- 下半部：策略績效全覽面板 (全畫面模式下佔滿 100% 畫面高) -->
+        <div class="performance-section" id="performance-section">
 
             <!-- 關鍵數據卡片 (隨當前策略切換聯動) -->
             <div class="metrics-card">
@@ -1411,6 +1446,7 @@ def build_html_content(
                     </div>
                 </div>
                 <div class="perf-tools">
+                    <button class="perf-tool-btn highlight" id="btn-flip-axes" title="翻轉 X/Y 軸向">🔄 翻轉軸向 (目前: 橫軸X損益 × 縱軸Y時間)</button>
                     <button class="perf-tool-btn" id="btn-toggle-compare-mode" title="切換累積損益或帳戶淨值">切換淨值/損益</button>
                     <button class="perf-tool-btn" id="btn-fit-chart" title="適配全屏">⛶ 適配縮放</button>
                 </div>
@@ -1501,7 +1537,7 @@ def build_html_content(
                         </label>
                     </div>
                     <div style="color:#787b86;">
-                        <span>💡 滑鼠懸浮查看三策略同時間累計損益與淨值比較</span>
+                        <span id="txt-axis-hint">💡 當前坐標：橫軸 X = 累積損益 (TWD) ｜ 縱軸 Y = 時間推進 (由上而下)，滑鼠 Hover 查看精準數值</span>
                     </div>
                 </div>
 
@@ -1573,6 +1609,7 @@ def build_html_content(
         let currentInterval = '5m';
         let currentStrategyKey = 'donchian'; // 預設顯示唐奇安通道策略
         let showMarkers = true;
+        let isSoloDataMode = true; // 預設全畫面數據模式
 
         // 圖表物件
         let klineChart = null;
@@ -1585,6 +1622,8 @@ def build_html_content(
         let isSyncingRange = false;
 
         // DOM 元素快取
+        const workspaceSplit = document.getElementById('workspace-split');
+        const klineSection = document.getElementById('kline-section');
         const klineContainer = document.getElementById('kline-container');
         const perfContainer = document.getElementById('perf-chart-container');
         const perfChartWrapper = document.getElementById('perf-chart-wrapper');
@@ -1604,6 +1643,7 @@ def build_html_content(
         const multiCanvas = document.getElementById('multi-compare-canvas');
         const multiViewport = document.getElementById('multi-canvas-viewport');
         const multiTooltip = document.getElementById('multi-tooltip');
+        const txtAxisHint = document.getElementById('txt-axis-hint');
 
         const legendTime = document.getElementById('legend-time');
         const legendOpen = document.getElementById('legend-open');
@@ -2053,6 +2093,10 @@ def build_html_content(
 
         // 定位特定交易之時間範圍
         function focusTradeOnChart(entryTs, exitTs) {{
+            // 若處於全畫面模式，點擊定位時自動切換回雙圖模式以便觀察
+            if (isSoloDataMode) {{
+                toggleLayoutMode();
+            }}
             if (!klineChart) return;
             const padSec = 3600 * 3;
             const fromSec = entryTs - padSec;
@@ -2103,6 +2147,9 @@ def build_html_content(
 
         // ==============================================================
         // 核心一：同屏多策略淨值對比繪圖引擎 (MultiStrategyCompareChart)
+        // 支援：
+        // 1. 預設 X/Y 軸相反：橫軸 X = 累積損益 / 淨值 (TWD) ｜ 縱軸 Y = 時間推進 (由上向下)
+        // 2. 支援一鍵翻轉軸向 (切換為橫軸時間 × 縱軸損益)
         // ==============================================================
         class MultiStrategyCompareChart {{
             constructor(canvas, viewport, tooltip) {{
@@ -2112,6 +2159,7 @@ def build_html_content(
                 this.ctx = canvas.getContext('2d');
 
                 this.mode = 'PNL'; // 'PNL' (相對累積損益) 或 'EQUITY' (總淨值)
+                this.axisMode = 'X_PNL_Y_TIME'; // 預設使用者指定：橫軸 X = 損益/淨值，縱軸 Y = 時間推進
                 this.visibleSeries = {{
                     donchian: true,
                     supertrend: true,
@@ -2144,7 +2192,7 @@ def build_html_content(
                     this.seriesData[k] = map;
                 }});
 
-                // 預先對齊各時間點之三策略數值
+                // 預先對齊各時間點之三策略數值 (Forward-fill 平滑對齊)
                 this.alignedPoints = [];
                 let lastVals = {{
                     donchian: {{ pnl: 0, equity: 105150 }},
@@ -2210,8 +2258,16 @@ def build_html_content(
                 const total = this.alignedPoints.length;
                 if (total === 0) return;
 
-                const ratio = Math.max(0, Math.min(1, (mx - L.padLeft) / L.chartWidth));
-                const idx = Math.round(ratio * (total - 1));
+                let idx = -1;
+                if (this.axisMode === 'X_PNL_Y_TIME') {{
+                    // Y 軸為時間推進軸
+                    const ratio = Math.max(0, Math.min(1, (my - L.padTop) / L.chartHeight));
+                    idx = Math.round(ratio * (total - 1));
+                }} else {{
+                    // X 軸為時間推進軸
+                    const ratio = Math.max(0, Math.min(1, (mx - L.padLeft) / L.chartWidth));
+                    idx = Math.round(ratio * (total - 1));
+                }}
 
                 if (idx !== this.hoverIndex) {{
                     this.hoverIndex = idx;
@@ -2252,12 +2308,11 @@ def build_html_content(
                 let html = `
                     <div class="mt-header">
                         <span>⏱️ ${{pt.datetime || 'K線時序'}}</span>
-                        <span>Bar #${{idx + 1}}</span>
+                        <span>Bar #${{idx + 1}} / ${{this.alignedPoints.length}}</span>
                     </div>
                 `;
 
                 if (this.visibleSeries.donchian) {{
-                    const isWin = dVal.pnl >= 0;
                     const isLeader = leader === 'donchian';
                     html += `
                         <div class="mt-row">
@@ -2272,7 +2327,6 @@ def build_html_content(
                 }}
 
                 if (this.visibleSeries.supertrend) {{
-                    const isWin = sVal.pnl >= 0;
                     const isLeader = leader === 'supertrend';
                     html += `
                         <div class="mt-row">
@@ -2287,7 +2341,6 @@ def build_html_content(
                 }}
 
                 if (this.visibleSeries.atr) {{
-                    const isWin = aVal.pnl >= 0;
                     const isLeader = leader === 'atr';
                     html += `
                         <div class="mt-row">
@@ -2328,6 +2381,19 @@ def build_html_content(
                 return this.mode;
             }}
 
+            flipAxes() {{
+                this.axisMode = (this.axisMode === 'X_PNL_Y_TIME') ? 'X_TIME_Y_PNL' : 'X_PNL_Y_TIME';
+                if (txtAxisHint) {{
+                    if (this.axisMode === 'X_PNL_Y_TIME') {{
+                        txtAxisHint.textContent = '💡 當前坐標：橫軸 X = 累積損益 (TWD) ｜ 縱軸 Y = 時間推進 (由上而下)，滑鼠 Hover 查看精準數值';
+                    }} else {{
+                        txtAxisHint.textContent = '💡 當前坐標：橫軸 X = 時間時序推進 ｜ 縱軸 Y = 累積損益 (TWD)，滑鼠 Hover 查看精準數值';
+                    }}
+                }}
+                this.draw();
+                return this.axisMode;
+            }}
+
             resizeAndDraw() {{
                 if (!this.viewport || !this.canvas) return;
                 const dpr = window.devicePixelRatio || 1;
@@ -2359,23 +2425,8 @@ def build_html_content(
                 const total = this.alignedPoints.length;
 
                 ctx.clearRect(0, 0, w, h);
-
-                const padTop = 20;
-                const padBottom = 26;
-                const padLeft = 20;
-                const padRight = 75;
-                const chartW = w - padLeft - padRight;
-                const chartH = h - padTop - padBottom;
-
-                this.layout = {{
-                    padTop, padBottom, padLeft, padRight,
-                    chartWidth: chartW,
-                    chartHeight: chartH
-                }};
-
                 if (total === 0) return;
 
-                // 計算全序列 Min / Max
                 const compKey = this.mode === 'PNL' ? 'pnl' : 'equity';
                 let minVal = Infinity;
                 let maxVal = -Infinity;
@@ -2392,100 +2443,239 @@ def build_html_content(
                 }});
 
                 if (this.mode === 'PNL') {{
-                    if (minVal > -2000) minVal = -2000;
-                    if (maxVal < 15000) maxVal = 15000;
+                    if (minVal > -3000) minVal = -3000;
+                    if (maxVal < 16000) maxVal = 16000;
                 }} else {{
                     if (minVal > 100000) minVal = 100000;
-                    if (maxVal < 120000) maxVal = 120000;
+                    if (maxVal < 122000) maxVal = 122000;
                 }}
 
                 const valRange = (maxVal - minVal) || 1;
-                const getY = (val) => padTop + chartH - ((val - minVal) / valRange) * chartH;
-                const getX = (idx) => padLeft + (idx / (total - 1)) * chartW;
-
-                // 1. 背景網格與 Y 軸刻度
-                ctx.lineWidth = 1;
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
-                ctx.fillStyle = '#787b86';
-                ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
-                ctx.textAlign = 'left';
-
-                const gridSteps = 5;
-                for (let i = 0; i <= gridSteps; i++) {{
-                    const curVal = minVal + (valRange / gridSteps) * i;
-                    const y = getY(curVal);
-
-                    ctx.beginPath();
-                    ctx.moveTo(padLeft, y);
-                    ctx.lineTo(padLeft + chartW, y);
-                    ctx.stroke();
-
-                    const sign = (curVal >= 0 && this.mode === 'PNL') ? '+' : '';
-                    const label = `${{sign}}${{curVal.toLocaleString('zh-TW', {{maximumFractionDigits: 0}})}}`;
-                    ctx.fillText(label, padLeft + chartW + 8, y + 3);
-                }}
-
-                // 2. 0 軸 (或期初資金線) 基準線
-                const baseVal = this.mode === 'PNL' ? 0 : 105150;
-                const baseY = getY(baseVal);
-                ctx.save();
-                ctx.setLineDash([4, 4]);
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-                ctx.beginPath();
-                ctx.moveTo(padLeft, baseY);
-                ctx.lineTo(padLeft + chartW, baseY);
-                ctx.stroke();
-                ctx.restore();
-
-                // 3. 繪製三條策略曲線
                 const seriesConfigs = [
                     {{ key: 'donchian', color: '#00e5ff', name: '唐奇安通道' }},
                     {{ key: 'supertrend', color: '#f0b90b', name: '超級趨勢線' }},
                     {{ key: 'atr', color: '#b388ff', name: 'ATR 基準' }}
                 ];
 
-                seriesConfigs.forEach(sc => {{
-                    if (!this.visibleSeries[sc.key]) return;
+                // ==============================================================
+                // 佈局模式 A：使用者指定之【橫軸 X = 損益/淨值 ｜ 縱軸 Y = 時間推進】
+                // ==============================================================
+                if (this.axisMode === 'X_PNL_Y_TIME') {{
+                    const padTop = 26;
+                    const padBottom = 45;
+                    const padLeft = 85; // 留給日期時間刻度
+                    const padRight = 35;
+                    const chartW = w - padLeft - padRight;
+                    const chartH = h - padTop - padBottom;
 
-                    ctx.save();
-                    ctx.lineWidth = 2.2;
-                    ctx.strokeStyle = sc.color;
-                    ctx.beginPath();
+                    this.layout = {{
+                        padTop, padBottom, padLeft, padRight,
+                        chartWidth: chartW,
+                        chartHeight: chartH
+                    }};
 
-                    for (let i = 0; i < total; i++) {{
-                        const x = getX(i);
-                        const y = getY(this.alignedPoints[i][sc.key][compKey]);
-                        if (i === 0) ctx.moveTo(x, y);
-                        else ctx.lineTo(x, y);
+                    const getX = (val) => padLeft + ((val - minVal) / valRange) * chartW;
+                    const getY = (idx) => padTop + (idx / Math.max(1, total - 1)) * chartH;
+
+                    // 1. 水平微弱時間網格線與左側時間標記
+                    ctx.lineWidth = 1;
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+                    ctx.fillStyle = '#787b86';
+                    ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+                    ctx.textAlign = 'right';
+
+                    const timeSteps = 6;
+                    for (let i = 0; i <= timeSteps; i++) {{
+                        const idx = Math.min(total - 1, Math.round((total - 1) * (i / timeSteps)));
+                        const y = getY(idx);
+
+                        ctx.beginPath();
+                        ctx.moveTo(padLeft, y);
+                        ctx.lineTo(padLeft + chartW, y);
+                        ctx.stroke();
+
+                        const dtStr = this.alignedPoints[idx].datetime || '';
+                        const shortDt = dtStr.length >= 16 ? dtStr.substring(5, 16) : dtStr;
+                        ctx.fillText(shortDt, padLeft - 8, y + 3);
                     }}
-                    ctx.stroke();
-                    ctx.restore();
-                }});
 
-                // 4. 十字準星與節點高亮
-                if (this.hoverIndex >= 0 && this.hoverIndex < total) {{
-                    const hx = getX(this.hoverIndex);
+                    // 2. 垂直微弱損益網格線與底部 X 軸損益刻度
+                    ctx.textAlign = 'center';
+                    const pnlSteps = 6;
+                    for (let i = 0; i <= pnlSteps; i++) {{
+                        const curVal = minVal + (valRange / pnlSteps) * i;
+                        const x = getX(curVal);
+
+                        ctx.beginPath();
+                        ctx.moveTo(x, padTop);
+                        ctx.lineTo(x, padTop + chartH);
+                        ctx.stroke();
+
+                        const sign = (curVal >= 0 && this.mode === 'PNL') ? '+' : '';
+                        const label = `${{sign}}${{curVal.toLocaleString('zh-TW', {{maximumFractionDigits: 0}})}}`;
+                        ctx.fillText(label, x, padTop + chartH + 18);
+                    }}
+
+                    // 3. 0 軸 (或期初資金線) 垂直基準線
+                    const baseVal = this.mode === 'PNL' ? 0 : 105150;
+                    const baseX = getX(baseVal);
                     ctx.save();
-                    ctx.setLineDash([3, 3]);
-                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                    ctx.setLineDash([4, 4]);
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+                    ctx.lineWidth = 1.5;
                     ctx.beginPath();
-                    ctx.moveTo(hx, padTop);
-                    ctx.lineTo(hx, padTop + chartH);
+                    ctx.moveTo(baseX, padTop);
+                    ctx.lineTo(baseX, padTop + chartH);
                     ctx.stroke();
+
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = '10px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('0 軸基準', baseX, padTop - 8);
                     ctx.restore();
 
-                    // 繪製各策略在該點的圓點
+                    // 4. 繪製三條策略曲線 (由頂部時間 0 向下鋪開)
                     seriesConfigs.forEach(sc => {{
                         if (!this.visibleSeries[sc.key]) return;
-                        const hy = getY(this.alignedPoints[this.hoverIndex][sc.key][compKey]);
-                        ctx.fillStyle = sc.color;
+
+                        ctx.save();
+                        ctx.lineWidth = 2.4;
+                        ctx.strokeStyle = sc.color;
                         ctx.beginPath();
-                        ctx.arc(hx, hy, 4.5, 0, Math.PI * 2);
-                        ctx.fill();
-                        ctx.strokeStyle = '#ffffff';
-                        ctx.lineWidth = 1.5;
+
+                        for (let i = 0; i < total; i++) {{
+                            const x = getX(this.alignedPoints[i][sc.key][compKey]);
+                            const y = getY(i);
+                            if (i === 0) ctx.moveTo(x, y);
+                            else ctx.lineTo(x, y);
+                        }}
                         ctx.stroke();
+                        ctx.restore();
                     }});
+
+                    // 5. 十字準星 (跟隨滑鼠 Y 軸時間位置)
+                    if (this.hoverIndex >= 0 && this.hoverIndex < total) {{
+                        const hy = getY(this.hoverIndex);
+                        ctx.save();
+                        ctx.setLineDash([3, 3]);
+                        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                        ctx.beginPath();
+                        ctx.moveTo(padLeft, hy);
+                        ctx.lineTo(padLeft + chartW, hy);
+                        ctx.stroke();
+                        ctx.restore();
+
+                        // 各策略圓點
+                        seriesConfigs.forEach(sc => {{
+                            if (!this.visibleSeries[sc.key]) return;
+                            const hx = getX(this.alignedPoints[this.hoverIndex][sc.key][compKey]);
+                            ctx.fillStyle = sc.color;
+                            ctx.beginPath();
+                            ctx.arc(hx, hy, 4.5, 0, Math.PI * 2);
+                            ctx.fill();
+                            ctx.strokeStyle = '#ffffff';
+                            ctx.lineWidth = 1.5;
+                            ctx.stroke();
+                        }});
+                    }}
+                }}
+                // ==============================================================
+                // 佈局模式 B：【橫軸 X = 時間推進 ｜ 縱軸 Y = 損益/淨值】 (備用翻轉模式)
+                // ==============================================================
+                else {{
+                    const padTop = 20;
+                    const padBottom = 26;
+                    const padLeft = 20;
+                    const padRight = 75;
+                    const chartW = w - padLeft - padRight;
+                    const chartH = h - padTop - padBottom;
+
+                    this.layout = {{
+                        padTop, padBottom, padLeft, padRight,
+                        chartWidth: chartW,
+                        chartHeight: chartH
+                    }};
+
+                    const getY = (val) => padTop + chartH - ((val - minVal) / valRange) * chartH;
+                    const getX = (idx) => padLeft + (idx / Math.max(1, total - 1)) * chartW;
+
+                    // 網格與 Y 刻度
+                    ctx.lineWidth = 1;
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+                    ctx.fillStyle = '#787b86';
+                    ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+                    ctx.textAlign = 'left';
+
+                    const gridSteps = 5;
+                    for (let i = 0; i <= gridSteps; i++) {{
+                        const curVal = minVal + (valRange / gridSteps) * i;
+                        const y = getY(curVal);
+
+                        ctx.beginPath();
+                        ctx.moveTo(padLeft, y);
+                        ctx.lineTo(padLeft + chartW, y);
+                        ctx.stroke();
+
+                        const sign = (curVal >= 0 && this.mode === 'PNL') ? '+' : '';
+                        const label = `${{sign}}${{curVal.toLocaleString('zh-TW', {{maximumFractionDigits: 0}})}}`;
+                        ctx.fillText(label, padLeft + chartW + 8, y + 3);
+                    }}
+
+                    // 0 軸水平線
+                    const baseVal = this.mode === 'PNL' ? 0 : 105150;
+                    const baseY = getY(baseVal);
+                    ctx.save();
+                    ctx.setLineDash([4, 4]);
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+                    ctx.beginPath();
+                    ctx.moveTo(padLeft, baseY);
+                    ctx.lineTo(padLeft + chartW, baseY);
+                    ctx.stroke();
+                    ctx.restore();
+
+                    // 三條曲線
+                    seriesConfigs.forEach(sc => {{
+                        if (!this.visibleSeries[sc.key]) return;
+
+                        ctx.save();
+                        ctx.lineWidth = 2.2;
+                        ctx.strokeStyle = sc.color;
+                        ctx.beginPath();
+
+                        for (let i = 0; i < total; i++) {{
+                            const x = getX(i);
+                            const y = getY(this.alignedPoints[i][sc.key][compKey]);
+                            if (i === 0) ctx.moveTo(x, y);
+                            else ctx.lineTo(x, y);
+                        }}
+                        ctx.stroke();
+                        ctx.restore();
+                    }});
+
+                    // 十字準星
+                    if (this.hoverIndex >= 0 && this.hoverIndex < total) {{
+                        const hx = getX(this.hoverIndex);
+                        ctx.save();
+                        ctx.setLineDash([3, 3]);
+                        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                        ctx.beginPath();
+                        ctx.moveTo(hx, padTop);
+                        ctx.lineTo(hx, padTop + chartH);
+                        ctx.stroke();
+                        ctx.restore();
+
+                        seriesConfigs.forEach(sc => {{
+                            if (!this.visibleSeries[sc.key]) return;
+                            const hy = getY(this.alignedPoints[this.hoverIndex][sc.key][compKey]);
+                            ctx.fillStyle = sc.color;
+                            ctx.beginPath();
+                            ctx.arc(hx, hy, 4.5, 0, Math.PI * 2);
+                            ctx.fill();
+                            ctx.strokeStyle = '#ffffff';
+                            ctx.lineWidth = 1.5;
+                            ctx.stroke();
+                        }});
+                    }}
                 }}
             }}
         }}
@@ -2725,6 +2915,33 @@ def build_html_content(
         // 互動事件與切換邏輯
         // ==============================================================
 
+        // 切換全畫面數據視圖 ⇄ 雙圖模式
+        function toggleLayoutMode() {{
+            isSoloDataMode = !isSoloDataMode;
+            workspaceSplit.classList.toggle('solo-data-mode', isSoloDataMode);
+
+            const btn = document.getElementById('btn-toggle-layout');
+            const txt = document.getElementById('txt-toggle-layout');
+
+            if (isSoloDataMode) {{
+                if (btn) btn.classList.add('mode-active');
+                if (txt) txt.textContent = '🗖 數據全畫面 (作用中)';
+                showToast('已切換為：數據全畫面視圖 (僅顯示量化數據與淨值圖)', 'info');
+            }} else {{
+                if (btn) btn.classList.remove('mode-active');
+                if (txt) txt.textContent = '📈 展開 K 線雙圖';
+                showToast('已切換為：雙圖聯動視圖 (K 線主圖 + 數據面板)', 'info');
+            }}
+
+            // 觸發自適應適配重繪
+            setTimeout(() => {{
+                if (klineChart && !isSoloDataMode) klineChart.timeScale().fitContent();
+                if (perfChart) perfChart.timeScale().fitContent();
+                if (multiCompareChart) multiCompareChart.resizeAndDraw();
+                if (tradeEquityChart) tradeEquityChart.resizeAndDraw();
+            }}, 100);
+        }}
+
         // 切換活躍策略
         function switchActiveStrategy(stratKey) {{
             if (!STRATEGIES_DATA[stratKey]) return;
@@ -2758,7 +2975,7 @@ def build_html_content(
                 tradeEquityChart.draw();
             }}
 
-            showToast(`已切換策略為: ${{strat.displayName}}`, 'success');
+            showToast(`已切換活躍策略為: ${{strat.displayName}}`, 'success');
         }}
 
         // 切換下半部分頁標籤
@@ -2794,6 +3011,25 @@ def build_html_content(
 
         // 事件監聽綁定
         function setupEventListeners() {{
+            // 頂部全畫面切換按鈕
+            const btnToggleLayout = document.getElementById('btn-toggle-layout');
+            if (btnToggleLayout) {{
+                btnToggleLayout.addEventListener('click', toggleLayoutMode);
+            }}
+
+            // 翻轉軸向按鈕
+            const btnFlipAxes = document.getElementById('btn-flip-axes');
+            if (btnFlipAxes) {{
+                btnFlipAxes.addEventListener('click', () => {{
+                    if (multiCompareChart) {{
+                        const curAxis = multiCompareChart.flipAxes();
+                        const isPnlX = (curAxis === 'X_PNL_Y_TIME');
+                        btnFlipAxes.textContent = `🔄 翻轉軸向 (${{isPnlX ? '目前: 橫軸X損益 × 縱軸Y時間' : '目前: 橫軸X時間 × 縱軸Y損益'}})`;
+                        showToast(`已切換軸向為: ${{isPnlX ? '橫軸 X 累積損益 ｜ 縱軸 Y 時間推進' : '橫軸 X 時間時序 ｜ 縱軸 Y 累積損益'}}`, 'success');
+                    }}
+                }});
+            }}
+
             // 頂部策略切換
             document.querySelectorAll('.strat-btn').forEach(btn => {{
                 btn.addEventListener('click', () => {{
@@ -2827,7 +3063,7 @@ def build_html_content(
             const fitBtn = document.getElementById('btn-fit-chart');
             if (fitBtn) {{
                 fitBtn.addEventListener('click', () => {{
-                    if (klineChart) klineChart.timeScale().fitContent();
+                    if (klineChart && !isSoloDataMode) klineChart.timeScale().fitContent();
                     if (perfChart) perfChart.timeScale().fitContent();
                     if (multiCompareChart) multiCompareChart.resizeAndDraw();
                     if (tradeEquityChart) tradeEquityChart.resizeAndDraw();
@@ -2837,7 +3073,7 @@ def build_html_content(
             const resetZoomBtn = document.getElementById('reset-zoom-btn');
             if (resetZoomBtn) {{
                 resetZoomBtn.addEventListener('click', () => {{
-                    if (klineChart) klineChart.timeScale().fitContent();
+                    if (klineChart && !isSoloDataMode) klineChart.timeScale().fitContent();
                     if (perfChart) perfChart.timeScale().fitContent();
                 }});
             }}
@@ -2938,6 +3174,11 @@ def build_html_content(
             renderTradesTable();
             loadIntervalData(currentInterval);
             initWebSocketClient();
+
+            // 若預設為全畫面數據視圖，確保 Canvas 適配容器全尺寸
+            if (isSoloDataMode && multiCompareChart) {{
+                setTimeout(() => multiCompareChart.resizeAndDraw(), 200);
+            }}
         }}
 
         if (document.readyState === 'loading') {{

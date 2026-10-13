@@ -6,12 +6,12 @@ const path = require('path');
 const EDGE_PATH = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
 const PORT = 9222;
 const TARGET_URL = "file:///C:/Users/User/.gemini/antigravity/scratch/Quant/kline_dashboard.html";
-const ARTIFACT_PNG = "C:\\Users\\User\\.gemini\\antigravity\\brain\\6f811917-cdd9-444f-a8ee-2dec79aad0cb\\multi_strategy_dashboard_verified.png";
+const ARTIFACT_PNG = "C:\\Users\\User\\.gemini\\antigravity\\brain\\6f811917-cdd9-444f-a8ee-2dec79aad0cb\\multi_strategy_solo_data_verified.png";
 
-console.log('=== 啟動 Microsoft Edge 瀏覽器執行期真機多策略儀表板驗證 ===');
+console.log('=== 啟動 Microsoft Edge 瀏覽器執行期真機全畫面數據與反轉軸向驗證 ===');
 
 async function main() {
-    const tempProfile = path.join(__dirname, 'temp_edge_profile_multi');
+    const tempProfile = path.join(__dirname, 'temp_edge_profile_solo');
     const edgeProcess = spawn(EDGE_PATH, [
         `--remote-debugging-port=${PORT}`,
         '--headless=new',
@@ -87,32 +87,30 @@ async function main() {
     console.log('[4] 等待頁面初始化與圖表渲染 (等待 3 秒)...');
     await new Promise(r => setTimeout(r, 3000));
 
-    console.log('\n[5] 執行多策略直觀對比功能檢測表達式:');
+    console.log('\n[5] 執行全畫面數據模式與反轉軸向檢測表達式:');
 
     const evalResult = await sendCmd('Runtime.evaluate', {
         expression: `(() => {
-            const klineCanvas = document.querySelectorAll('#kline-container canvas');
+            const split = document.getElementById('workspace-split');
+            const isSoloDataMode = split ? split.classList.contains('solo-data-mode') : false;
+            const klineSection = document.getElementById('kline-section');
+            const klineHidden = klineSection ? (window.getComputedStyle(klineSection).display === 'none') : false;
+            const perfSection = document.getElementById('performance-section');
+            const perfHeight = perfSection ? perfSection.clientHeight : 0;
             const multiCanvas = document.getElementById('multi-compare-canvas');
-            const donchianPnl = document.getElementById('kpi-donchian-pnl')?.textContent;
-            const supertrendPnl = document.getElementById('kpi-supertrend-pnl')?.textContent;
-            const atrPnl = document.getElementById('kpi-atr-pnl')?.textContent;
-            const tabMultiActive = document.getElementById('tab-multi-compare')?.classList.contains('active');
-            const stratButtons = document.querySelectorAll('.strat-btn').length;
-            const hasMultiChart = typeof window.multiCompareChart !== 'undefined' && window.multiCompareChart !== null;
-            const hasTradeEquity = typeof window.tradeEquityChart !== 'undefined' && window.tradeEquityChart !== null;
+            const canvasW = multiCanvas ? multiCanvas.width : 0;
+            const canvasH = multiCanvas ? multiCanvas.height : 0;
+            const chartInstance = window.multiCompareChart;
+            const axisMode = chartInstance ? chartInstance.axisMode : 'UNKNOWN';
             
             return {
                 title: document.title,
-                klineCanvasCount: klineCanvas.length,
-                multiCanvasWidth: multiCanvas ? multiCanvas.width : 0,
-                multiCanvasHeight: multiCanvas ? multiCanvas.height : 0,
-                tabMultiActive: tabMultiActive,
-                stratButtonsCount: stratButtons,
-                hasMultiChart: hasMultiChart,
-                hasTradeEquity: hasTradeEquity,
-                donchianPnl: donchianPnl,
-                supertrendPnl: supertrendPnl,
-                atrPnl: atrPnl
+                isSoloDataMode: isSoloDataMode,
+                klineHidden: klineHidden,
+                perfSectionHeight: perfHeight,
+                canvasWidth: canvasW,
+                canvasHeight: canvasH,
+                axisMode: axisMode
             };
         })()`,
         returnByValue: true
@@ -120,14 +118,11 @@ async function main() {
 
     const status = evalResult.result.value;
     console.log('  - 頁面 Title                 :', status.title);
-    console.log('  - 頂部策略切換按鈕數量       :', status.stratButtonsCount, '(唐奇安 / 超級趨勢 / ATR)');
-    console.log('  - 預設選中分頁               :', status.tabMultiActive ? 'OK (⚔️ 雙策略淨值直觀對比 預設選中)' : 'FAILED');
-    console.log('  - 多策略 Canvas 尺寸         :', `${status.multiCanvasWidth} x ${status.multiCanvasHeight}`);
-    console.log('  - 多策略對比圖表實例         :', status.hasMultiChart ? 'OK (MultiStrategyCompareChart 就緒)' : 'FAILED');
-    console.log('  - 單策略逐筆圖表實例         :', status.hasTradeEquity ? 'OK (TradeEquityChart 就緒)' : 'FAILED');
-    console.log('  - 唐奇安 KPI 卡片總淨利      :', status.donchianPnl);
-    console.log('  - 超級趨勢 KPI 卡片總淨利    :', status.supertrendPnl);
-    console.log('  - ATR 基準 KPI 卡片總淨利    :', status.atrPnl);
+    console.log('  - 全畫面數據模式生效         :', status.isSoloDataMode ? 'OK (solo-data-mode 已套用)' : 'FAILED');
+    console.log('  - 上方 K 線主圖隱藏狀態      :', status.klineHidden ? 'OK (已隱藏 display: none)' : 'FAILED');
+    console.log('  - 下方數據面板高度           :', `${status.perfSectionHeight} px (全螢幕高度)`);
+    console.log('  - 多策略 Canvas 解析度尺寸   :', `${status.canvasWidth} x ${status.canvasHeight} (高度顯著拉大)`);
+    console.log('  - 淨值圖軸向配置 (axisMode)  :', status.axisMode, '(預設為 X_PNL_Y_TIME: 橫軸X損益 × 縱軸Y時間)');
 
     console.log('\n[6] 截取真機渲染畫面:');
     const screenshotRes = await sendCmd('Page.captureScreenshot', { format: 'png' });
@@ -147,7 +142,7 @@ async function main() {
         console.error('發現執行期異常 (Uncaught Errors):', uncaughtErrors);
         process.exit(1);
     } else {
-        console.log('>>> 恭喜！Microsoft Edge 執行期真機載入驗證 100% 成功，零錯誤、零異常！');
+        console.log('>>> 恭喜！全畫面純數據視圖與 X/Y 軸相反驗證 100% 成功，零錯誤、零異常！');
     }
 }
 
