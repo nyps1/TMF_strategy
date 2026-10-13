@@ -847,6 +847,196 @@ def build_html_content(
             pointer-events: none;
             letter-spacing: 2px;
         }}
+
+        /* 即時連線狀態指示徽章 */
+        .live-badge {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            user-select: none;
+        }}
+        .live-badge.offline {{
+            background: rgba(242, 54, 69, 0.12);
+            color: #f23645;
+            border: 1px solid rgba(242, 54, 69, 0.3);
+        }}
+        .live-badge.online {{
+            background: rgba(8, 153, 129, 0.15);
+            color: #089981;
+            border: 1px solid rgba(8, 153, 129, 0.35);
+        }}
+        .live-indicator-dot {{
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background-color: currentColor;
+            box-shadow: 0 0 6px currentColor;
+        }}
+        .live-badge.online .live-indicator-dot {{
+            animation: pulse-dot 1.5s infinite;
+        }}
+        @keyframes pulse-dot {{
+            0% {{ opacity: 1; transform: scale(1); }}
+            50% {{ opacity: 0.4; transform: scale(1.2); }}
+            100% {{ opacity: 1; transform: scale(1); }}
+        }}
+
+        /* 決策者策略參數設定面板 Modal */
+        .modal-overlay {{
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.65);
+            z-index: 100;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(4px);
+        }}
+        .modal-content {{
+            background: #141720;
+            border: 1px solid #282f42;
+            border-radius: 8px;
+            width: 480px;
+            max-width: 90vw;
+            padding: 20px 24px;
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
+            color: #d1d4dc;
+        }}
+        .modal-header {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #232733;
+        }}
+        .modal-title {{
+            font-size: 15px;
+            font-weight: 700;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+        .modal-close-btn {{
+            background: transparent;
+            border: none;
+            color: #787b86;
+            font-size: 18px;
+            cursor: pointer;
+        }}
+        .modal-close-btn:hover {{
+            color: #ffffff;
+        }}
+        .config-form-grid {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 18px;
+        }}
+        .config-field {{
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }}
+        .config-field.full-width {{
+            grid-column: span 2;
+        }}
+        .config-field label {{
+            font-size: 11px;
+            color: #848e9c;
+            font-weight: 500;
+        }}
+        .config-field input {{
+            background: #0d0f14;
+            border: 1px solid #2a3042;
+            border-radius: 4px;
+            color: #ffffff;
+            padding: 6px 10px;
+            font-size: 12px;
+            outline: none;
+            transition: border-color 0.15s;
+        }}
+        .config-field input:focus {{
+            border-color: #2962ff;
+        }}
+        .modal-actions {{
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            padding-top: 12px;
+            border-top: 1px solid #232733;
+        }}
+        .btn-modal-save {{
+            background: #089981;
+            color: #ffffff;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }}
+        .btn-modal-save:hover {{
+            background: #0aa88f;
+        }}
+        .btn-modal-test {{
+            background: #242b3d;
+            color: #d1d4dc;
+            border: 1px solid #363d54;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+        }}
+        .btn-modal-test:hover {{
+            background: #313a52;
+            color: #ffffff;
+        }}
+
+        /* 即時通知 Toast */
+        .toast-container {{
+            position: fixed;
+            top: 60px;
+            right: 20px;
+            z-index: 200;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: none;
+        }}
+        .toast-card {{
+            background: rgba(17, 20, 28, 0.95);
+            border-left: 4px solid #2962ff;
+            border-radius: 4px;
+            padding: 10px 14px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+            color: #ffffff;
+            font-size: 12px;
+            min-width: 240px;
+            backdrop-filter: blur(6px);
+            animation: slide-in 0.25s ease-out;
+            pointer-events: auto;
+        }}
+        .toast-card.success {{
+            border-left-color: #089981;
+        }}
+        .toast-card.danger {{
+            border-left-color: #f23645;
+        }}
+        @keyframes slide-in {{
+            from {{ transform: translateX(100%); opacity: 0; }}
+            to {{ transform: translateX(0); opacity: 1; }}
+        }}
     </style>
 </head>
 <body>
@@ -877,12 +1067,68 @@ def build_html_content(
         </div>
 
         <div class="actions-group">
+            <button class="toggle-btn" id="btn-strategy-panel">
+                <span>⚙️ 策略決策參數</span>
+            </button>
+            <div id="live-status-badge" class="live-badge offline" title="即時行情 WebSocket 串流狀態">
+                <span class="live-indicator-dot"></span>
+                <span id="live-status-text">串流: 離線</span>
+            </div>
             <button class="toggle-btn active" id="toggle-markers-btn">
                 <span>📍 交易標記: 顯示</span>
             </button>
             <button class="reset-btn" id="reset-zoom-btn">適配畫面 (Fit)</button>
         </div>
     </div>
+
+    <!-- 決策者策略參數設定 Modal -->
+    <div class="modal-overlay" id="strategy-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">
+                    <span>🎯 量化決策者策略參數中心</span>
+                </div>
+                <button class="modal-close-btn" id="modal-close-btn">&times;</button>
+            </div>
+            <div class="config-form-grid">
+                <div class="config-field full-width">
+                    <label>策略名稱 (Strategy Name)</label>
+                    <input type="text" id="cfg-strat-name" value="動態布林突破策略 (嚴格拉回確認版)" readonly />
+                </div>
+                <div class="config-field">
+                    <label>布林通道週期 (bb_length)</label>
+                    <input type="number" id="cfg-bb-len" value="20" min="5" max="100" />
+                </div>
+                <div class="config-field">
+                    <label>布林標準差倍數 (bb_std)</label>
+                    <input type="number" id="cfg-bb-std" value="2.0" step="0.1" min="1.0" max="4.0" />
+                </div>
+                <div class="config-field">
+                    <label>ATR 計算週期 (atr_length)</label>
+                    <input type="number" id="cfg-atr-len" value="14" min="5" max="50" />
+                </div>
+                <div class="config-field">
+                    <label>ATR 停利倍數 (atr_tp_multiplier)</label>
+                    <input type="number" id="cfg-atr-tp" value="2.0" step="0.1" min="0.5" max="10.0" />
+                </div>
+                <div class="config-field">
+                    <label>拉回確認強度 (pullback_ratio)</label>
+                    <input type="number" id="cfg-pullback" value="0.25" step="0.05" min="0.1" max="0.5" />
+                </div>
+                <div class="config-field">
+                    <label>最大槓桿上限 (max_leverage)</label>
+                    <input type="number" id="cfg-leverage" value="7.0" step="0.5" min="1.0" max="15.0" />
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-modal-test" id="btn-test-tick">⚡ 注入模擬 Tick</button>
+                <button class="btn-modal-save" id="btn-save-strategy">💾 同步實時引擎</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 即時通知容器 -->
+    <div class="toast-container" id="toast-container"></div>
 
     <!-- 雙窗格主工作區 -->
     <div class="workspace-split">
@@ -1512,35 +1758,6 @@ def build_html_content(
             }}
         }}
 
-        // 綁定事件監聽器
-        function setupEventListeners() {{
-            // 週期切換按鈕
-            document.querySelectorAll('.tf-btn').forEach(btn => {{
-                btn.addEventListener('click', () => {{
-                    document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-                    const interval = btn.getAttribute('data-interval');
-                    loadIntervalData(interval);
-                }});
-            }});
-
-            // 交易標記切換開關
-            const toggleMarkersBtn = document.getElementById('toggle-markers-btn');
-            toggleMarkersBtn.addEventListener('click', () => {{
-                showMarkers = !showMarkers;
-                if (showMarkers) {{
-                    toggleMarkersBtn.classList.add('active');
-                    toggleMarkersBtn.innerHTML = '<span>📍 交易標記: 顯示</span>';
-                    const rawBars = KLINE_DATA[currentInterval];
-                    const candleBars = rawBars.map(b => ({{ time: Number(b.time) }}));
-                    applyMarkers(alignMarkersToBars(RAW_MARKERS, candleBars));
-                }} else {{
-                    toggleMarkersBtn.classList.remove('active');
-                    toggleMarkersBtn.innerHTML = '<span>📍 交易標記: 隱藏</span>';
-                    applyMarkers([]);
-                }}
-            }});
-
         // ==============================================================
         // 固定 Y 軸 (交易次數) × X 軸 (損益 / 帳戶淨值) Canvas 高效互動圖表引擎
         // ==============================================================
@@ -2135,6 +2352,81 @@ def build_html_content(
                 }});
             }}
 
+            // 決策者策略面板開關
+            const btnStrategyPanel = document.getElementById('btn-strategy-panel');
+            const strategyModal = document.getElementById('strategy-modal');
+            const modalCloseBtn = document.getElementById('modal-close-btn');
+
+            if (btnStrategyPanel && strategyModal) {{
+                btnStrategyPanel.addEventListener('click', () => {{
+                    strategyModal.style.display = 'flex';
+                }});
+            }}
+            if (modalCloseBtn && strategyModal) {{
+                modalCloseBtn.addEventListener('click', () => {{
+                    strategyModal.style.display = 'none';
+                }});
+            }}
+            if (strategyModal) {{
+                strategyModal.addEventListener('click', (e) => {{
+                    if (e.target === strategyModal) strategyModal.style.display = 'none';
+                }});
+            }}
+
+            // 同步實時引擎按鈕
+            const btnSaveStrategy = document.getElementById('btn-save-strategy');
+            if (btnSaveStrategy) {{
+                btnSaveStrategy.addEventListener('click', async () => {{
+                    const payload = {{
+                        bb_length: parseInt(document.getElementById('cfg-bb-len').value) || 20,
+                        bb_std: parseFloat(document.getElementById('cfg-bb-std').value) || 2.0,
+                        atr_length: parseInt(document.getElementById('cfg-atr-len').value) || 14,
+                        atr_tp_multiplier: parseFloat(document.getElementById('cfg-atr-tp').value) || 2.0,
+                        pullback_ratio: parseFloat(document.getElementById('cfg-pullback').value) || 0.25,
+                        max_leverage: parseFloat(document.getElementById('cfg-leverage').value) || 7.0
+                    }};
+                    try {{
+                        const resp = await fetch('http://127.0.0.1:8000/api/strategy/config', {{
+                            method: 'POST',
+                            headers: {{ 'Content-Type': 'application/json' }},
+                            body: JSON.stringify(payload)
+                        }});
+                        const resJson = await resp.json();
+                        if (resJson.status === 'SUCCESS') {{
+                            showToast('✅ 策略參數已同步至即時引擎！', 'success');
+                            if (strategyModal) strategyModal.style.display = 'none';
+                        }} else {{
+                            showToast('❌ 參數同步失敗: ' + resJson.message, 'danger');
+                        }}
+                    }} catch (err) {{
+                        showToast('❌ 無法連線至後端 API (127.0.0.1:8000)', 'danger');
+                    }}
+                }});
+            }}
+
+            // 注入測試 Tick 按鈕
+            const btnTestTick = document.getElementById('btn-test-tick');
+            if (btnTestTick) {{
+                btnTestTick.addEventListener('click', async () => {{
+                    const nowTs = Math.floor(Date.now() / 1000);
+                    const lastClose = (KLINE_DATA[currentInterval] && KLINE_DATA[currentInterval].length > 0)
+                        ? KLINE_DATA[currentInterval][KLINE_DATA[currentInterval].length - 1].close
+                        : 20000;
+                    const testPrice = lastClose + (Math.floor(Math.random() * 21) - 10);
+                    try {{
+                        const resp = await fetch(`http://127.0.0.1:8000/api/live/feed-tick?timestamp=${{nowTs}}&price=${{testPrice}}&volume=5`, {{
+                            method: 'POST'
+                        }});
+                        const resJson = await resp.json();
+                        if (resJson.status === 'SUCCESS') {{
+                            showToast(`⚡ 測試 Tick 注入成功: ${{testPrice}} 元`, 'success');
+                        }}
+                    }} catch (e) {{
+                        showToast('❌ 注入失敗，請確認後端是否正在運行', 'danger');
+                    }}
+                }});
+            }}
+
             // 頁籤切換：交易損益淨值圖 (預設) vs 累計損益 (時間軸) vs 交易明細清單
             function switchTab(activeTab) {{
                 [tabTradeEquity, tabCumPnl, tabTradesTable].forEach(tab => {{
@@ -2235,6 +2527,121 @@ def build_html_content(
             }}
         }}
 
+        // 即時通知 Toast 產生器
+        function showToast(msg, type = 'info') {{
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+            const toast = document.createElement('div');
+            toast.className = `toast-card ${{type}}`;
+            toast.textContent = msg;
+            container.appendChild(toast);
+            setTimeout(() => {{
+                toast.style.transition = 'all 0.3s';
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(100%)';
+                setTimeout(() => toast.remove(), 300);
+            }}, 3500);
+        }}
+
+        // 即時全雙工 WebSocket 客戶端
+        function initWebSocketClient() {{
+            const badge = document.getElementById('live-status-badge');
+            const badgeText = document.getElementById('live-status-text');
+            const wsHost = window.location.hostname || '127.0.0.1';
+            const wsPort = window.location.port ? window.location.port : '8000';
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${{wsProtocol}}//${{wsHost}}:${{wsPort}}/ws/live`;
+
+            let ws = null;
+            let reconnectTimer = null;
+
+            function connect() {{
+                try {{
+                    ws = new WebSocket(wsUrl);
+
+                    ws.onopen = () => {{
+                        if (badge) {{
+                            badge.className = 'live-badge online';
+                            badgeText.textContent = '串流: 連線中';
+                        }}
+                        showToast('🟢 即時行情串流連線就緒', 'success');
+                    }};
+
+                    ws.onmessage = (event) => {{
+                        try {{
+                            const msg = JSON.parse(event.data);
+                            handleLiveMessage(msg);
+                        }} catch (e) {{}}
+                    }};
+
+                    ws.onclose = () => {{
+                        if (badge) {{
+                            badge.className = 'live-badge offline';
+                            badgeText.textContent = '串流: 離線';
+                        }}
+                        scheduleReconnect();
+                    }};
+
+                    ws.onerror = () => {{
+                        if (badge) {{
+                            badge.className = 'live-badge offline';
+                            badgeText.textContent = '串流: 離線';
+                        }}
+                    }};
+                }} catch (e) {{
+                    scheduleReconnect();
+                }}
+            }}
+
+            function scheduleReconnect() {{
+                if (reconnectTimer) return;
+                reconnectTimer = setTimeout(() => {{
+                    reconnectTimer = null;
+                    connect();
+                }}, 5000);
+            }}
+
+            function handleLiveMessage(msg) {{
+                if (!msg || !msg.type) return;
+                const d = msg.data;
+
+                if (msg.type === 'bar_update' && candlestickSeries && volumeSeries) {{
+                    candlestickSeries.update({{
+                        time: d.time,
+                        open: d.open,
+                        high: d.high,
+                        low: d.low,
+                        close: d.close
+                    }});
+                    volumeSeries.update({{
+                        time: d.time,
+                        value: d.volume,
+                        color: d.close >= d.open ? '#089981' : '#f23645'
+                    }});
+                }} else if (msg.type === 'signal') {{
+                    showToast(`🚀 策略訊號: ${{d.reason || d.signal_type}} @ ${{d.price}}`, 'success');
+                }} else if (msg.type === 'position_open') {{
+                    showToast(`🎯 進場開倉: ${{d.side}} ${{d.qty}}口 @ ${{d.entry_price}}`, 'success');
+                }} else if (msg.type === 'trade_closed') {{
+                    const sign = d.net_pnl >= 0 ? '+' : '';
+                    const toastType = d.net_pnl >= 0 ? 'success' : 'danger';
+                    showToast(`💰 平倉結算: #${{d.trade_id}} 淨損益 ${{sign}}${{d.net_pnl}} 元`, toastType);
+                }} else if (msg.type === 'strategy_updated') {{
+                    showToast('⚙️ 策略參數已同步生效', 'success');
+                }} else if (msg.type === 'initial_state' && d.strategy && d.strategy.config) {{
+                    const c = d.strategy.config;
+                    if (document.getElementById('cfg-bb-len')) document.getElementById('cfg-bb-len').value = c.bb_length;
+                    if (document.getElementById('cfg-bb-std')) document.getElementById('cfg-bb-std').value = c.bb_std;
+                    if (document.getElementById('cfg-atr-len')) document.getElementById('cfg-atr-len').value = c.atr_length;
+                    if (document.getElementById('cfg-atr-tp')) document.getElementById('cfg-atr-tp').value = c.atr_tp_multiplier;
+                    if (document.getElementById('cfg-pullback')) document.getElementById('cfg-pullback').value = c.pullback_ratio;
+                    if (document.getElementById('cfg-leverage')) document.getElementById('cfg-leverage').value = c.max_leverage;
+                }}
+            }}
+
+            connect();
+        }}
+
         // 全域初始化入口
         function initDashboard() {{
             renderKeyMetrics();
@@ -2244,6 +2651,7 @@ def build_html_content(
             // 初始化固定 Y 軸(交易次數) × X 軸(損益) 圖表
             if (tradeEquityCanvas && canvasScrollViewport && tradeTooltip) {{
                 tradeEquityChart = new TradeEquityChart(tradeEquityCanvas, canvasScrollViewport, tradeTooltip);
+                window.tradeEquityChart = tradeEquityChart;
                 setTimeout(() => {{
                     tradeEquityChart.resizeAndDraw();
                 }}, 100);
@@ -2253,6 +2661,7 @@ def build_html_content(
             setupEventListeners();
             renderTradesTable();
             loadIntervalData(currentInterval);
+            initWebSocketClient();
         }}
 
         if (document.readyState === 'loading') {{

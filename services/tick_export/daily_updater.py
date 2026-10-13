@@ -36,8 +36,8 @@ class DailyDataSyncService:
     def __init__(
         self,
         db_path: str = "data/market_data.db",
-        excel_path: str = "微台10_每秒逐筆歷史紀錄.xlsx",
-        parquet_path: str = "微台10_每秒逐筆歷史紀錄.parquet",
+        excel_path: str = "data/excel/微台10_每秒逐筆歷史紀錄.xlsx",
+        parquet_path: str = "data/parquet/微台10_每秒逐筆歷史紀錄.parquet",
         cache_dir: str = "data/ticks_cache"
     ) -> None:
         """
@@ -258,6 +258,42 @@ class DailyDataSyncService:
         logger.info(f"SQLite 增量寫入完成，共計寫入 {inserted_count:,} 筆秒 K 線記錄。")
         return inserted_count
 
+    @staticmethod
+    def get_taifex_trading_date(dt: Optional[datetime] = None) -> str:
+        """
+        計算給定時間點所屬之台灣期交所 (TAIFEX) 期貨交易日 (格式: YYYY-MM-DD)。
+
+        期交所盤別對應規則：
+        1. 15:00 ~ 23:59:59：屬於次一交易日 (T+1) 之夜盤。
+           - 若為週五 15:00 以後，次一交易日順延至下週一 (+3 天)。
+           - 若為平日，次一交易日為隔日 (+1 天)。
+        2. 00:00 ~ 06:00:00：週六清晨為週五夜盤延伸，交易日歸下週一。
+        3. 00:00 ~ 14:59:59：平日正常交易日 (T 日盤與清晨夜盤)。
+
+        參數:
+            dt (Optional[datetime]): 指定時間物件，若為 None 則取系統當前時間。
+
+        返回:
+            str: 格式為 YYYY-MM-DD 之期貨交易日字串。
+        """
+        if dt is None:
+            dt = datetime.now()
+
+        from datetime import timedelta
+        if dt.hour >= 15:
+            next_date = dt.date() + timedelta(days=1)
+            if next_date.weekday() == 5:  # 週六
+                next_date += timedelta(days=2)
+            elif next_date.weekday() == 6:  # 週日
+                next_date += timedelta(days=1)
+            return next_date.strftime("%Y-%m-%d")
+        elif dt.weekday() == 5 and dt.hour < 6:
+            # 週六清晨屬於週五夜盤，所屬交易日為下週一
+            next_date = dt.date() + timedelta(days=2)
+            return next_date.strftime("%Y-%m-%d")
+        else:
+            return dt.strftime("%Y-%m-%d")
+
     def sync(
         self,
         api,
@@ -269,14 +305,14 @@ class DailyDataSyncService:
 
         參數:
             api: 已登入驗證之 Shioaji API 實例。
-            target_date (Optional[str]): 指定同步之交易日 (格式: YYYY-MM-DD)。若為 None 則自動採用當前日期。
+            target_date (Optional[str]): 指定同步之交易日 (格式: YYYY-MM-DD)。若為 None 則自動採用期交所當前交易日。
             force_refresh (bool): 是否強制刷新本機快取重新自 API 下載。
 
         返回:
             Dict[str, Any]: 同步執行成果結構化報表資訊。
         """
         t0 = time.time()
-        sync_date = target_date or date.today().strftime("%Y-%m-%d")
+        sync_date = target_date or self.get_taifex_trading_date()
 
         logger.info("=" * 60)
         logger.info(f"開始執行微台10每日數據增量同步任務 (目標交易日: {sync_date})")

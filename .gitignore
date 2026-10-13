@@ -19,7 +19,17 @@ frontend/node_modules/
 # Database and Big Binaries
 *.db
 data/cache/
+data/ticks_cache/
 data/market_data.db
 
-# Local Temporary Files
+# Logs and Credentials
+*.log
+shioaji.log
+.env
+
+# Local Temporary and Shortcut Files
 *.tmp
+*.lnk
+~$*.xlsx
+~$*.xls
+*.lock

@@ -30,10 +30,10 @@ pool = None
 @app.on_event("startup")
 async def startup():
     global pool
-    # Try connecting with retries
-    for i in range(5):
-        try:
-            pool = await asyncpg.create_pool(
+    # 本機環境嘗試非阻塞連線 TimescaleDB，若無啟動 Docker 則優雅略過
+    try:
+        pool = await asyncio.wait_for(
+            asyncpg.create_pool(
                 host=DB_HOST,
                 port=DB_PORT,
                 user=DB_USER,
@@ -41,12 +41,12 @@ async def startup():
                 database=DB_NAME,
                 min_size=1,
                 max_size=10
-            )
-            print("Successfully connected to TimescaleDB")
-            break
-        except Exception as e:
-            print(f"Failed to connect to TimescaleDB (attempt {i+1}/5): {e}")
-            await asyncio.sleep(2)
+            ),
+            timeout=1.0
+        )
+        print("Successfully connected to TimescaleDB")
+    except Exception as e:
+        print(f"TimescaleDB connection skipped or unavailable: {e}")
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -322,3 +322,170 @@ async def serve_kline_page_endpoint():
     if html_file.exists():
         return FileResponse(str(html_file), media_type="text/html")
     return HTMLResponse("<h1>K 線圖網頁正在生成中，請稍後重新整理。</h1>", status_code=200)
+
+
+# =====================================================================
+# 即時交易與 WebSocket 廣播模組路由分發 (Services/Live & Strategy)
+# =====================================================================
+from fastapi import WebSocket, WebSocketDisconnect
+from services.live.websocket_manager import WebSocketManager
+from services.live.engine import LiveTradingEngine
+from services.strategy.models import StrategyConfig
+from services.strategy.bollinger_pullback import BollingerPullbackStrategy
+
+ws_manager = WebSocketManager()
+live_strategy = BollingerPullbackStrategy()
+
+
+def _dispatch_live_event(event_type: str, data: dict) -> None:
+    """非同步事件廣播橋接函式。"""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.create_task(ws_manager.broadcast({"type": event_type, "data": data}))
+    except Exception:
+        pass
+
+
+live_engine = LiveTradingEngine(strategy=live_strategy, on_event=_dispatch_live_event)
+
+
+@app.websocket("/ws/live")
+async def websocket_live_endpoint(websocket: WebSocket):
+    """
+    即時行情、K 棒更新、策略訊號與成交明細全雙工 WebSocket 連線端點。
+    提供前端圖表零延遲串流。
+    """
+    await ws_manager.connect(websocket)
+    try:
+        # 連線建立時立即推送一次當前策略與帳戶狀態
+        await websocket.send_json({
+            "type": "initial_state",
+            "data": live_engine.get_status()
+        })
+        while True:
+            # 接收客戶端 Ping 或指令訊息
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+    except Exception as e:
+        ws_manager.disconnect(websocket)
+
+
+@app.get("/api/strategy/config")
+async def get_strategy_config_endpoint() -> dict:
+    """
+    決策者查詢當前策略配置參數 API 路由端點。
+
+    返回:
+        dict: 包含 status, data, message 之標準化 JSON 回應。
+    """
+    try:
+        return {
+            "status": "SUCCESS",
+            "message": "Strategy configuration retrieved successfully.",
+            "data": live_engine.config.model_dump()
+        }
+    except Exception as e:
+        return {
+            "status": "ERROR",
+            "message": f"Failed to retrieve strategy config: {str(e)}",
+            "root_cause": str(type(e).__name__),
+            "suggested_fix": "Please check strategy model integrity."
+        }
+
+
+@app.post("/api/strategy/config")
+async def update_strategy_config_endpoint(new_config: StrategyConfig) -> dict:
+    """
+    決策者動態調整策略與風控參數 API 路由端點。
+    允許盤中調整布林通道、ATR 停利倍數與槓桿風控上限。
+
+    參數:
+        new_config (StrategyConfig): 決策者提交之新參數模型。
+
+    返回:
+        dict: 包含 status, data, message 之標準化 JSON 回應。
+    """
+    try:
+        global live_strategy, live_engine
+        live_strategy = BollingerPullbackStrategy(config=new_config)
+        live_engine.strategy = live_strategy
+        live_engine.config = new_config
+        # 廣播參數更新事件給所有在線前端
+        await ws_manager.broadcast({
+            "type": "strategy_updated",
+            "data": new_config.model_dump()
+        })
+        return {
+            "status": "SUCCESS",
+            "message": f"Strategy '{new_config.strategy_name}' updated successfully.",
+            "data": new_config.model_dump()
+        }
+    except Exception as e:
+        return {
+            "status": "ERROR",
+            "message": f"Failed to update strategy config: {str(e)}",
+            "root_cause": str(type(e).__name__),
+            "suggested_fix": "Please verify submitted parameters conform to StrategyConfig schema."
+        }
+
+
+@app.get("/api/live/status")
+async def get_live_status_endpoint() -> dict:
+    """
+    查詢即時模擬實盤當前持倉、帳戶淨值與浮動損益 API 路由端點。
+
+    返回:
+        dict: 包含 status, data, message 之標準化 JSON 回應。
+    """
+    try:
+        return {
+            "status": "SUCCESS",
+            "message": "Live status retrieved successfully.",
+            "data": live_engine.get_status()
+        }
+    except Exception as e:
+        return {
+            "status": "ERROR",
+            "message": f"Failed to retrieve live status: {str(e)}",
+            "root_cause": str(type(e).__name__),
+            "suggested_fix": "Please verify live engine status."
+        }
+
+
+@app.post("/api/live/feed-tick")
+async def feed_live_tick_endpoint(timestamp: int, price: float, volume: int) -> dict:
+    """
+    注入即時成交 Tick API 路由端點 (支援外部行情服務調用或盤中模擬測試)。
+
+    參數:
+        timestamp (int): Unix Epoch 時間戳 (秒)。
+        price (float): 成交價格。
+        volume (int): 成交口數。
+
+    返回:
+        dict: 包含 status, data, message 之標準化 JSON 回應。
+    """
+    try:
+        live_engine.on_tick(timestamp=timestamp, price=price, volume=volume)
+        return {
+            "status": "SUCCESS",
+            "message": "Tick processed successfully.",
+            "data": {
+                "timestamp": timestamp,
+                "price": price,
+                "volume": volume,
+                "position_side": live_engine.current_side.value
+            }
+        }
+    except Exception as e:
+        return {
+            "status": "ERROR",
+            "message": f"Failed to process tick: {str(e)}",
+            "root_cause": str(type(e).__name__),
+            "suggested_fix": "Please verify tick parameters (timestamp, price > 0, volume >= 0)."
+        }
+

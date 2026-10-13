@@ -12,13 +12,16 @@
 - **風控部位管理**: 動態計算安全下單口數 (Safe Qty)，嚴格控管 7.0 倍槓桿與保證金邊界
 - **出場機制**: 盤中觸及前根極值停損，收盤跌破 ATR 動能訊號停利
 
-## 策略數據與檔案結構
-- `services/`: 核心服務層 (行情載入、回測引擎、指標運算、SQLite 時序管理)
-- `backend/`: FastAPI 即時訂閱與 API 路由分發層
-- `frontend/`: Lightweight Charts v5.2.0 視覺化元件庫
-- `trades.csv`: 369 筆真實交易紀錄明細
-- `kline_dashboard.html`: 互動式雙圖儀表板 (包含建倉平倉 Markers 與 0 軸 Baseline 績效圖)
-- `backtest_report.html`: 完整統計指標報告
+## 專案核心分層架構 (Architecture Layout)
+- `strategies/`: **【決策人物策略庫】**，供決策者專注構思、撰寫與微調策略（包含依特徵命名的 `bollinger_pullback_strategy.py`，通用風控與指標抽離至 `strategies/common/`）
+- `data/`: **【數據中心】**，包含集中存放的 Excel 歷史檔（`data/excel/`）、Parquet 高速快取（`data/parquet/`）與 SQLite 資料庫（`data/market_data.db`）
+- `services/`: **【底層基礎服務層】**，負責高頻時序存取、即時行情聚合、WebSocket 廣播與增量同步管線
+- `backend/`: **【API 路由層】**，FastAPI 與 WebSocket 即時決策推播
+- `archive/`: **【封存歸檔區】**，集中收納歷史報表、早期測試腳本與診斷小工具
+- `daily_sync_tmf10.py`: 每日 06:00 與 14:00 自動增量同步微台秒 K 數據之主程式
+- `generate_kline_dashboard.py`: 編譯生成多週期 K 線與回測淨值儀表板之主程式
+- `kline_dashboard.html`: 核心互動式 TradingView 視覺化儀表板
+- `微台10_每秒逐筆歷史紀錄.xlsx - 捷徑.lnk`: 根目錄快速開啟 Excel 歷史紀錄之捷徑入口
 
 ## 環境依賴與安裝 (Dependencies)
 詳見 [DEPENDENCIES.md](DEPENDENCIES.md)。

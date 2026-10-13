@@ -17,6 +17,9 @@
 | openpyxl     | == 3.1.5 | 處理與匯出 Excel (.xlsx) 檔案格式標準函式庫。 |
 | xlsxwriter   | == 3.2.9 | 高效能流式寫入超大數據量 Excel 檔案（支援常數記憶體模式）。 |
 | httpx        | == 0.28.1| 非同步 HTTP 測試客戶端，支援 FastAPI 單元測試。 |
+| fastapi      | == 0.110.0| 高效能非同步 Web 框架，提供策略配置 API 與 WebSocket 全雙工即時串流通道。 |
+| uvicorn      | == 0.29.0 | ASGI 伺服器，負責驅動非同步 FastAPI 與 WebSocket 高頻事件廣播。 |
+| websockets   | == 13.1  | 全雙工 WebSocket 協定核心函式庫，支撐即時行情與策略訊號推播。 |
 | lightweight-charts | == 5.2.0 | 前端專業級 TradingView 高頻 K 線與 Baseline 走勢圖 Canvas 渲染引擎。 |
 
 ## 系統與容器環境依賴

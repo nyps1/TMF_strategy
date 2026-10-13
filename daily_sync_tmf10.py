@@ -105,8 +105,8 @@ def run_daily_sync(
 
         service = DailyDataSyncService(
             db_path="data/market_data.db",
-            excel_path="微台10_每秒逐筆歷史紀錄.xlsx",
-            parquet_path="微台10_每秒逐筆歷史紀錄.parquet",
+            excel_path="data/excel/微台10_每秒逐筆歷史紀錄.xlsx",
+            parquet_path="data/parquet/微台10_每秒逐筆歷史紀錄.parquet",
             cache_dir="data/ticks_cache"
         )
 
@@ -114,8 +114,7 @@ def run_daily_sync(
             logger.info("【預演模式已啟動】將不異動任何既有檔案與資料庫記錄。")
             latest_time = service.get_latest_recorded_time()
             contract = api.Contracts.Futures.TMF.get("TMFJ6")
-            from datetime import date
-            sync_date = target_date or date.today().strftime("%Y-%m-%d")
+            sync_date = target_date or DailyDataSyncService.get_taifex_trading_date()
             df_new = service.fetch_and_resample(
                 api=api,
                 contract=contract,
