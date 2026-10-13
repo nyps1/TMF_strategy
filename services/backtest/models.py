@@ -36,10 +36,12 @@ class BacktestConfig(BaseModel):
     point_value: float = Field(default=10.0, description="每一跳動點數價值 (微台指=10元)")
     margin_req: float = Field(default=35050.0, description="單口所需原始保證金 (新台幣)")
     max_leverage: float = Field(default=7.0, description="帳戶最高允許總槓桿倍數")
+    position_sizing_mode: str = Field(default="notional", description="部位計算模式: 'notional' (名目合約價值上限) 或 'margin' (保證金成數模式)")
     
     # 布林通道設定 (真實成本版)
     bb_length: int = Field(default=30, description="布林通道 SMA 週期長度")
     bb_mult: float = Field(default=1.75, description="布林通道標準差乘數")
+    pullback_ratio: float = Field(default=0.25, description="拉回確認比例 (預設 0.25 即 25% K棒)")
     
     # 出場模式設定 (atr / donchian / supertrend)
     exit_mode: str = Field(default="atr", description="出場模式: atr / donchian / supertrend")

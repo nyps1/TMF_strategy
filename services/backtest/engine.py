@@ -81,6 +81,12 @@ class BacktestEngine:
         if self.equity <= 0 or current_price <= 0:
             return 0
 
+        if self.config.position_sizing_mode == "margin":
+            raw_cap_qty = math.floor(self.equity / self.config.margin_req)
+            raw_lev_qty = math.floor((self.equity * self.config.max_leverage) / self.config.margin_req)
+            safe_qty = max(1, min(raw_cap_qty, raw_lev_qty))
+            return max(0, int(safe_qty))
+
         max_contract_val = self.equity * self.config.max_leverage
         single_contract_val = current_price * self.config.point_value
         theoretical_qty = max_contract_val / single_contract_val
@@ -349,13 +355,14 @@ class BacktestEngine:
 
                 # 2. 檢核當根是否構成「第一根訊號棒」
                 if not np.isnan(bb_uppers[i]) and not np.isnan(bb_lowers[i]):
+                    ratio = self.config.pullback_ratio
                     # 多頭突破: 收盤大於布林上軌且為紅 K
                     if cur_close > bb_uppers[i] and cur_close > cur_open:
                         body = cur_close - cur_open
                         self.pending_signal_side = PositionSide.LONG
                         self.signal_bar_idx = i
                         self.signal_bar_close = cur_close
-                        self.signal_bar_q1 = cur_close - (body * 0.25)
+                        self.signal_bar_q1 = cur_close - (body * ratio)
                         self.signal_bar_extreme = cur_low  # 記錄第一根最低價作為多單停損
 
                     # 空頭突破: 收盤小於布林下軌且為黑 K
@@ -364,7 +371,7 @@ class BacktestEngine:
                         self.pending_signal_side = PositionSide.SHORT
                         self.signal_bar_idx = i
                         self.signal_bar_close = cur_close
-                        self.signal_bar_q1 = cur_close + (body * 0.25)
+                        self.signal_bar_q1 = cur_close + (body * ratio)
                         self.signal_bar_extreme = cur_high  # 記錄第一根最高價作為空單停損
 
             # ----------------------------------------------------
