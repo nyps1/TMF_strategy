@@ -136,3 +136,117 @@ def check_trailing_take_profit(
             )
 
     return None
+
+
+def check_donchian_exit(
+    timestamp: int,
+    close_price: float,
+    current_side: PositionSide,
+    entry_price: float,
+    donchian_lower: float,
+    donchian_upper: float,
+) -> Optional[SignalEvent]:
+    """
+    唐奇安通道 (前 N 根低/高點) 收盤出場判定。
+
+    參數:
+        timestamp (int): 當前 K 棒收盤時間戳。
+        close_price (float): 當前 K 棒收盤價。
+        current_side (PositionSide): 當前持倉方向。
+        entry_price (float): 進場成本價。
+        donchian_lower (float): 前 N 根最低價 (多頭防守線)。
+        donchian_upper (float): 前 N 根最高價 (空頭防守線)。
+
+    返回:
+        Optional[SignalEvent]: 若跌破前低或漲破前高則回傳平倉訊號。
+    """
+    if current_side == PositionSide.NONE:
+        return None
+
+    dt_str = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+
+    if current_side == PositionSide.LONG and donchian_lower > 0:
+        if close_price < donchian_lower:
+            # 判斷是獲利平倉還是停損平倉
+            sig_type = SignalType.TAKE_PROFIT if close_price >= entry_price else SignalType.STOP_LOSS
+            return SignalEvent(
+                timestamp=timestamp,
+                time_str=dt_str,
+                signal_type=sig_type,
+                side=PositionSide.LONG,
+                price=close_price,
+                reason=f"唐奇安通道平倉 (Close {close_price:.1f} < 前低 {donchian_lower:.1f})",
+                extra={"donchian_lower": donchian_lower},
+            )
+
+    elif current_side == PositionSide.SHORT and donchian_upper > 0:
+        if close_price > donchian_upper:
+            sig_type = SignalType.TAKE_PROFIT if close_price <= entry_price else SignalType.STOP_LOSS
+            return SignalEvent(
+                timestamp=timestamp,
+                time_str=dt_str,
+                signal_type=sig_type,
+                side=PositionSide.SHORT,
+                price=close_price,
+                reason=f"唐奇安通道平倉 (Close {close_price:.1f} > 前高 {donchian_upper:.1f})",
+                extra={"donchian_upper": donchian_upper},
+            )
+
+    return None
+
+
+def check_supertrend_exit(
+    timestamp: int,
+    close_price: float,
+    current_side: PositionSide,
+    entry_price: float,
+    supertrend_val: float,
+    direction: int,
+) -> Optional[SignalEvent]:
+    """
+    超級趨勢線 (SuperTrend) 單向不可逆收盤出場判定。
+
+    參數:
+        timestamp (int): 當前 K 棒收盤時間戳。
+        close_price (float): 當前 K 棒收盤價。
+        current_side (PositionSide): 當前持倉方向。
+        entry_price (float): 進場成本價。
+        supertrend_val (float): 當前超級趨勢防守價位。
+        direction (int): SuperTrend 趨勢方向 (1: 多頭, -1: 空頭)。
+
+    返回:
+        Optional[SignalEvent]: 若多頭跌破或空頭漲破 SuperTrend 則回傳平倉訊號。
+    """
+    if current_side == PositionSide.NONE or supertrend_val <= 0:
+        return None
+
+    dt_str = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+
+    # 多頭部位持倉中，若 SuperTrend 方向反轉為空頭 (-1) 或收盤跌破 SuperTrend 防守線
+    if current_side == PositionSide.LONG and (direction == -1 or close_price < supertrend_val):
+        sig_type = SignalType.TAKE_PROFIT if close_price >= entry_price else SignalType.STOP_LOSS
+        return SignalEvent(
+            timestamp=timestamp,
+            time_str=dt_str,
+            signal_type=sig_type,
+            side=PositionSide.LONG,
+            price=close_price,
+            reason=f"超級趨勢線平倉 (Close {close_price:.1f} < ST {supertrend_val:.1f})",
+            extra={"supertrend": supertrend_val, "direction": direction},
+        )
+
+    # 空頭部位持倉中，若 SuperTrend 方向反轉為多頭 (1) 或收盤漲破 SuperTrend 防守線
+    elif current_side == PositionSide.SHORT and (direction == 1 or close_price > supertrend_val):
+        sig_type = SignalType.TAKE_PROFIT if close_price <= entry_price else SignalType.STOP_LOSS
+        return SignalEvent(
+            timestamp=timestamp,
+            time_str=dt_str,
+            signal_type=sig_type,
+            side=PositionSide.SHORT,
+            price=close_price,
+            reason=f"超級趨勢線平倉 (Close {close_price:.1f} > ST {supertrend_val:.1f})",
+            extra={"supertrend": supertrend_val, "direction": direction},
+        )
+
+    return None
+

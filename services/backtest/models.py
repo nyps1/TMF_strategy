@@ -21,6 +21,8 @@ class ExitReason(str, Enum):
     """出場原因列舉"""
     STOP_LOSS = "STOP_LOSS"                    # 盤中觸碰停損點
     ATR_TAKE_PROFIT = "ATR_TAKE_PROFIT"        # ATR 動能指標下穿均線收盤平倉
+    DONCHIAN_EXIT = "DONCHIAN_EXIT"            # 唐奇安通道收盤平倉
+    SUPERTREND_EXIT = "SUPERTREND_EXIT"        # 超級趨勢線收盤平倉
     ROLLOVER_SETTLEMENT = "ROLLOVER_SETTLEMENT"  # 結算日強制平倉結算
 
 
@@ -29,6 +31,7 @@ class BacktestConfig(BaseModel):
     回測全域參數設定模型。
     包含資金部位控管、指標計算參數以及交易摩擦成本。
     """
+    strategy_name: str = Field(default="布林動能突破", description="策略名稱標籤")
     initial_capital: float = Field(default=105150.0, description="期初總資金 (新台幣)")
     point_value: float = Field(default=10.0, description="每一跳動點數價值 (微台指=10元)")
     margin_req: float = Field(default=35050.0, description="單口所需原始保證金 (新台幣)")
@@ -38,10 +41,20 @@ class BacktestConfig(BaseModel):
     bb_length: int = Field(default=30, description="布林通道 SMA 週期長度")
     bb_mult: float = Field(default=1.75, description="布林通道標準差乘數")
     
-    # ATR 動能設定 (真實成本版)
+    # 出場模式設定 (atr / donchian / supertrend)
+    exit_mode: str = Field(default="atr", description="出場模式: atr / donchian / supertrend")
+    
+    # ATR 動能設定
     atr_length: int = Field(default=14, description="ATR 計算週期長度")
     atr_sig_length: int = Field(default=5, description="ATR Signal SMA 週期長度")
     
+    # 唐奇安通道設定
+    donchian_length: int = Field(default=4, description="唐奇安通道追蹤前 N 根極值")
+
+    # 超級趨勢線設定
+    supertrend_length: int = Field(default=10, description="超級趨勢線 ATR 長度")
+    supertrend_multiplier: float = Field(default=3.0, description="超級趨勢線 ATR 乘數")
+
     # 摩擦成本設定 (真實成本版)
     commission_per_order: float = Field(default=18.0, description="單邊單口手續費 (新台幣，預設 18 元)")
     tax_rate: float = Field(default=0.00002, description="期貨交易稅率 (十萬分之二)")

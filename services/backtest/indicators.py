@@ -104,26 +104,113 @@ def calculate_atr(
     return df
 
 
+def calculate_donchian(
+    df: pd.DataFrame,
+    length: int = 4
+) -> pd.DataFrame:
+    """
+    計算唐奇安通道 (前 N 根已收盤棒之極端值)。
+    以 shift(1) 排除當前評估棒，避免 Look-ahead Bias。
+
+    參數:
+        df (pd.DataFrame): 包含 'high', 'low' 欄位之 DataFrame。
+        length (int): 追蹤長度，預設 4。
+
+    返回:
+        pd.DataFrame: 包含 'donchian_high', 'donchian_low' 之 DataFrame。
+    """
+    df["donchian_high"] = df["high"].shift(1).rolling(window=length).max()
+    df["donchian_low"] = df["low"].shift(1).rolling(window=length).min()
+    return df
+
+
+def calculate_supertrend_series(
+    df: pd.DataFrame,
+    length: int = 10,
+    multiplier: float = 3.0
+) -> pd.DataFrame:
+    """
+    向量化與滾動計算超級趨勢線 (SuperTrend)。
+
+    參數:
+        df (pd.DataFrame): 包含 'high', 'low', 'close', 'atr_val' 欄位之 DataFrame。
+        length (int): ATR 計算長度。
+        multiplier (float): 乘數。
+
+    返回:
+        pd.DataFrame: 包含 'supertrend_val', 'supertrend_dir' 欄位之 DataFrame。
+    """
+    high = df["high"].to_numpy()
+    low = df["low"].to_numpy()
+    close = df["close"].to_numpy()
+    
+    # 確保有 atr_val
+    if "atr_val" not in df:
+        df = calculate_atr(df, length=length, sig_length=5)
+    atr = df["atr_val"].to_numpy()
+
+    n = len(df)
+    st_val = np.zeros(n)
+    st_dir = np.ones(n, dtype=int)  # 1: 多頭, -1: 空頭
+
+    prev_upper = 0.0
+    prev_lower = 0.0
+    direction = 1
+
+    for i in range(1, n):
+        if np.isnan(atr[i]) or atr[i] <= 0:
+            continue
+
+        median = (high[i] + low[i]) / 2.0
+        basic_upper = median + (multiplier * atr[i])
+        basic_lower = median - (multiplier * atr[i])
+
+        if i == 1:
+            final_upper = basic_upper
+            final_lower = basic_lower
+        else:
+            final_upper = basic_upper if basic_upper < prev_upper or close[i - 1] > prev_upper else prev_upper
+            final_lower = basic_lower if basic_lower > prev_lower or close[i - 1] < prev_lower else prev_lower
+
+        if direction == 1:
+            if close[i] < final_lower:
+                direction = -1
+                current_st = final_upper
+            else:
+                current_st = final_lower
+        else:
+            if close[i] > final_upper:
+                direction = 1
+                current_st = final_lower
+            else:
+                current_st = final_upper
+
+        st_val[i] = current_st
+        st_dir[i] = direction
+        prev_upper = final_upper
+        prev_lower = final_lower
+
+    df["supertrend_val"] = st_val
+    df["supertrend_dir"] = st_dir
+    return df
+
+
 def populate_all_indicators(
     df: pd.DataFrame,
     bb_length: int = 20,
     bb_mult: float = 2.0,
     atr_length: int = 14,
-    atr_sig_length: int = 9
+    atr_sig_length: int = 9,
+    donchian_length: int = 4,
+    supertrend_length: int = 10,
+    supertrend_multiplier: float = 3.0,
 ) -> pd.DataFrame:
     """
     批次計算策略所需之所有技術指標並附加至 DataFrame。
-
-    參數:
-        df (pd.DataFrame): 輸入行情 DataFrame (需含 open, high, low, close)。
-        bb_length (int): 布林通道長度。
-        bb_mult (float): 布林通道標準差乘數。
-        atr_length (int): ATR 長度。
-        atr_sig_length (int): ATR Signal 均線長度。
-
-    返回:
-        pd.DataFrame: 附加完整技術指標數值之 DataFrame。
     """
     df = calculate_bollinger_bands(df, length=bb_length, mult=bb_mult)
     df = calculate_atr(df, length=atr_length, sig_length=atr_sig_length)
+    df = calculate_donchian(df, length=donchian_length)
+    df = calculate_supertrend_series(df, length=supertrend_length, multiplier=supertrend_multiplier)
     return df
+

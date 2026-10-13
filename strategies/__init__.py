@@ -7,6 +7,8 @@
 from .common.models import PositionSide, SignalType, SignalEvent, StrategyConfig
 from .common.base import BaseStrategy
 from .bollinger_pullback_strategy import BollingerPullbackStrategy
+from .bollinger_donchian_strategy import BollingerDonchianStrategy
+from .bollinger_supertrend_strategy import BollingerSuperTrendStrategy
 
 __all__ = [
     "PositionSide",
@@ -15,4 +17,6 @@ __all__ = [
     "StrategyConfig",
     "BaseStrategy",
     "BollingerPullbackStrategy",
+    "BollingerDonchianStrategy",
+    "BollingerSuperTrendStrategy",
 ]

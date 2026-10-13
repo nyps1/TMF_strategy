@@ -193,7 +193,10 @@ class BacktestEngine:
             bb_length=self.config.bb_length,
             bb_mult=self.config.bb_mult,
             atr_length=self.config.atr_length,
-            atr_sig_length=self.config.atr_sig_length
+            atr_sig_length=self.config.atr_sig_length,
+            donchian_length=self.config.donchian_length,
+            supertrend_length=self.config.supertrend_length,
+            supertrend_multiplier=self.config.supertrend_multiplier,
         )
 
         n_bars = len(df)
@@ -210,6 +213,10 @@ class BacktestEngine:
         bb_lowers = df["bb_lower"].to_numpy()
         atr_vals = df["atr_val"].to_numpy()
         atr_sigs = df["atr_sig"].to_numpy()
+        donchian_highs = df["donchian_high"].to_numpy()
+        donchian_lows = df["donchian_low"].to_numpy()
+        st_vals = df["supertrend_val"].to_numpy()
+        st_dirs = df["supertrend_dir"].to_numpy()
 
         for i in range(1, n_bars):
             ts = timestamps[i]
@@ -275,17 +282,48 @@ class BacktestEngine:
                         reason=ExitReason.STOP_LOSS
                     )
 
-                # 檢核 3: ATR 動能停利 (ta.crossunder(atr_val, atr_sig))
-                # 依訪談確認決策：於當根 5 分 K 收盤價平倉
-                elif not np.isnan(atr_vals[i]) and not np.isnan(atr_sigs[i]) and not np.isnan(atr_vals[i-1]) and not np.isnan(atr_sigs[i-1]):
-                    prev_above = atr_vals[i-1] >= atr_sigs[i-1]
-                    cur_below = atr_vals[i] < atr_sigs[i]
-                    if prev_above and cur_below:
+                # 檢核 3: 依設定之 exit_mode 執行停損停利出場
+                elif self.config.exit_mode == "donchian":
+                    # 唐奇安通道出場：跌破前 N 根最低點 (多頭) 或漲破前 N 根最高點 (空頭)
+                    if pos.side == PositionSide.LONG and not np.isnan(donchian_lows[i]) and cur_close < donchian_lows[i]:
                         self._close_position(
                             exit_time=cur_time_str,
                             raw_exit_price=cur_close,
-                            reason=ExitReason.ATR_TAKE_PROFIT
+                            reason=ExitReason.DONCHIAN_EXIT
                         )
+                    elif pos.side == PositionSide.SHORT and not np.isnan(donchian_highs[i]) and cur_close > donchian_highs[i]:
+                        self._close_position(
+                            exit_time=cur_time_str,
+                            raw_exit_price=cur_close,
+                            reason=ExitReason.DONCHIAN_EXIT
+                        )
+
+                elif self.config.exit_mode == "supertrend":
+                    # 超級趨勢線出場：方向反轉或收盤擊穿不可逆軌道線
+                    if pos.side == PositionSide.LONG and (st_dirs[i] == -1 or cur_close < st_vals[i]):
+                        self._close_position(
+                            exit_time=cur_time_str,
+                            raw_exit_price=cur_close,
+                            reason=ExitReason.SUPERTREND_EXIT
+                        )
+                    elif pos.side == PositionSide.SHORT and (st_dirs[i] == 1 or cur_close > st_vals[i]):
+                        self._close_position(
+                            exit_time=cur_time_str,
+                            raw_exit_price=cur_close,
+                            reason=ExitReason.SUPERTREND_EXIT
+                        )
+
+                elif self.config.exit_mode == "atr":
+                    # ATR 動能停利 (ta.crossunder(atr_val, atr_sig))
+                    if not np.isnan(atr_vals[i]) and not np.isnan(atr_sigs[i]) and not np.isnan(atr_vals[i-1]) and not np.isnan(atr_sigs[i-1]):
+                        prev_above = atr_vals[i-1] >= atr_sigs[i-1]
+                        cur_below = atr_vals[i] < atr_sigs[i]
+                        if prev_above and cur_below:
+                            self._close_position(
+                                exit_time=cur_time_str,
+                                raw_exit_price=cur_close,
+                                reason=ExitReason.ATR_TAKE_PROFIT
+                            )
 
             # ----------------------------------------------------
             # 步驟 C: 第二根確認棒與第一根訊號棒判斷 (僅在空手時評估)
