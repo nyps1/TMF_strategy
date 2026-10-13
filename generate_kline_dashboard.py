@@ -544,6 +544,9 @@ def build_html_content(
     """
     data_json = json.dumps(intervals_data, ensure_ascii=False)
     strategies_json = json.dumps(multi_strategies_data, ensure_ascii=False)
+    bars_5m_count = len(intervals_data.get("5m", []))
+    bars_1m_list = intervals_data.get("1m", [])
+    latest_bar_time = bars_1m_list[-1].get("datetime", "--") if bars_1m_list else "--"
 
     script_tag = f"<script>{standalone_js}</script>" if standalone_js else (
         '<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>'
@@ -2219,6 +2222,7 @@ def build_html_content(
                     <div class="metrics-title">
                         <span>關鍵數據全覽</span>
                         <span class="metrics-strat-indicator" id="current-strat-indicator">當前活躍策略: 布林_唐奇安</span>
+                        <span style="font-size:11px; color:#089981; background:rgba(8,153,129,0.12); border:1px solid rgba(8,153,129,0.3); padding:2px 8px; border-radius:4px; font-weight:600;" id="latest-kbar-badge">⏱️ K棒最新收錄至: {latest_bar_time} (5分K 共 {bars_5m_count:,} 根)</span>
                     </div>
                     <div class="shortcut-hint-bar">
                         <span>快捷鍵: <kbd class="kbd-tag">Space</kbd> 全畫面/雙圖</span>
@@ -2593,7 +2597,7 @@ def build_html_content(
             <div class="params-modal-header">
                 <div class="params-modal-title">
                     <span>⚙️ 策略參數調校與即時回測工作台</span>
-                    <span style="font-size:11px; font-weight:normal; color:#8b949e;">(極速撮合 3,947 根 K 棒，即時刷新全視圖、軌道與結構分析)</span>
+                    <span style="font-size:11px; font-weight:normal; color:#8b949e;">(極速撮合 {bars_5m_count:,} 根 K 棒，即時刷新全視圖、軌道與結構分析)</span>
                 </div>
                 <button class="params-modal-close" id="btn-close-params-modal" title="關閉視窗 (Esc)">✕</button>
             </div>
@@ -5598,7 +5602,10 @@ def build_html_content(
                 }};
                 ['donchian', 'supertrend', 'atr'].forEach(k => executeDynamicBacktest(k, strategyConfigs[k], true));
                 populateModalInputs(activeModalStrat);
-                showToast('🌟 已一鍵套用【三張圖最佳化參數組合 (滿倉 3 口模式)】！ATR 淨利 +43,202 / 唐奇安 +20,839 / 超級趨勢 +17,193 TWD', 'success');
+                const atrPnl = STRATEGIES_DATA.atr ? STRATEGIES_DATA.atr.metrics.totalNetProfitStr : '';
+                const dcPnl = STRATEGIES_DATA.donchian ? STRATEGIES_DATA.donchian.metrics.totalNetProfitStr : '';
+                const stPnl = STRATEGIES_DATA.supertrend ? STRATEGIES_DATA.supertrend.metrics.totalNetProfitStr : '';
+                showToast(`🌟 已一鍵套用【三張圖最佳化參數組合 (滿倉 3 口模式)】！ATR 淨利 ${{atrPnl}} / 唐奇安 ${{dcPnl}} / 超級趨勢 ${{stPnl}} TWD`, 'success');
             }} else {{
                 ['donchian', 'supertrend', 'atr'].forEach(k => {{
                     strategyConfigs[k] = JSON.parse(JSON.stringify(defaultStrategyConfigs[k]));

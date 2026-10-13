@@ -26,16 +26,26 @@ def main() -> None:
     """主入口點。"""
     pipeline = DailyUpdatePipeline()
     report = pipeline.execute_pipeline()
-    print("\n" + "=" * 60)
+    sync_info = report.get("sync_step", {})
+    sync_detail = sync_info.get("detail", {})
+
+    print("\n" + "=" * 65)
     print("           微台10 定時資料更新管線執行摘要報表")
-    print("=" * 60)
+    print("=" * 65)
     print(f"  執行時點       : {report['executed_at']}")
     print(f"  整體狀態       : {report['pipeline_status']}")
     print(f"  總執行耗時     : {report['total_elapsed_seconds']} 秒")
-    print(f"  1. 行情增量同步: {report['sync_step'].get('status')}")
-    print(f"  2. Excel 更新  : {report['excel_step'].get('status')} ({report['excel_step'].get('size_kb', 0)} KB)")
+    print(f"  1. 行情增量同步: {sync_info.get('status')}")
+    if sync_detail.get("status") == "SUCCESS":
+        print(f"     - 新增秒 K 數: {sync_detail.get('new_bars_count', 0):,} 筆")
+        print(f"     - 增量起訖區間: {sync_detail.get('new_range_start')} ~ {sync_detail.get('new_range_end')}")
+        print(f"     - SQLite 寫入: {sync_detail.get('sqlite_inserted', 0):,} 筆")
+        print(f"     - 秒K Excel  : 追加 {sync_detail.get('excel_appended', 0):,} 列")
+    elif sync_detail.get("status") == "UP_TO_DATE":
+        print(f"     - 最新秒 K 時間: {sync_detail.get('latest_time')} (已為最新)")
+    print(f"  2. 策略 Excel  : {report['excel_step'].get('status')} ({report['excel_step'].get('size_kb', 0)} KB)")
     print(f"  3. HTML 儀表板 : {report['html_step'].get('status')} ({report['html_step'].get('size_mb', 0)} MB)")
-    print("=" * 60 + "\n")
+    print("=" * 65 + "\n")
 
     if report["pipeline_status"] != "SUCCESS":
         sys.exit(1)

@@ -42,18 +42,26 @@ class DailyUpdatePipeline:
         self.excel_path = os.path.abspath(excel_path)
         self.html_path = os.path.abspath(html_path)
 
-    def run_sync_step(self, force_refresh: bool = False) -> Dict[str, Any]:
+    def run_sync_step(self, force_refresh: bool = True) -> Dict[str, Any]:
         """
-        步驟一：嘗試透過 Shioaji API 執行行情數據增量同步。
+        步驟一：透過 Shioaji API 執行行情數據增量同步（自動載入 .env 憑證並預設強制刷新當日最新 Tick）。
+        將最新日夜盤秒 K 線同步寫入 SQLite (data/market_data.db)、Parquet 與秒 K Excel。
         若環境未配置 API 金鑰，則優雅降級跳過外部連線，保留本機既有歷史數據。
 
         參數:
-            force_refresh (bool): 是否強制刷新下載。
+            force_refresh (bool): 是否強制刷新下載當日最新 Tick，預設為 True。
 
         返回:
             Dict[str, Any]: 行情同步執行狀態摘要。
         """
         logger.info("【管線步驟 1/3】開始執行行情數據增量同步檢測...")
+        from dotenv import load_dotenv
+        env_path = os.path.join(os.path.dirname(self.html_path), ".env")
+        if os.path.exists(env_path):
+            load_dotenv(dotenv_path=env_path, override=False)
+        else:
+            load_dotenv(override=False)
+
         api_key = os.environ.get("SHIOAJI_API_KEY")
         secret_key = os.environ.get("SHIOAJI_SECRET_KEY")
 
@@ -68,7 +76,11 @@ class DailyUpdatePipeline:
         try:
             from daily_sync_tmf10 import run_daily_sync
             res = run_daily_sync(force_refresh=force_refresh)
-            logger.info(f"行情增量同步執行完成: {res.get('status')}")
+            logger.info(
+                f"行情增量同步執行完成: status={res.get('status')}, "
+                f"new_bars={res.get('new_bars_count', 0)}, "
+                f"range=[{res.get('new_range_start')} ~ {res.get('new_range_end')}]"
+            )
             return {"step": "sync", "status": res.get("status", "SUCCESS"), "detail": res}
         except Exception as e:
             logger.warning(f"行情增量同步遭遇非致命異常 ({e})，降級繼續執行本機回測與圖表更新。")

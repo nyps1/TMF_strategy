@@ -66,11 +66,21 @@ class TickExporter:
             cached_df = pd.read_parquet(cache_file)
             if not cached_df.empty and "ts" in cached_df.columns:
                 max_dt = pd.to_datetime(cached_df["ts"].max())
-                # 若快取僅至清晨 (<= 05:05)，且目前本機時間已超過下午 13:45，判定快取不完整需更新全日數據
                 now = pd.Timestamp.now()
-                is_today = (date_str == now.strftime("%Y-%m-%d"))
-                if is_today and max_dt.hour < 8 and (now.hour > 13 or (now.hour == 13 and now.minute >= 45)):
-                    logger.info(f"偵測到 {date_str} 快取僅包含夜盤數據 (最新時間: {max_dt})，已過日盤收盤，自動重新拉取全日數據...")
+                target_dt_date = pd.to_datetime(date_str).date()
+                is_incomplete_night = (
+                    (max_dt.date() < target_dt_date or (max_dt.date() == target_dt_date and max_dt.hour < 4))
+                    and (now.date() > target_dt_date or (now.date() == target_dt_date and now.hour >= 5))
+                )
+                is_incomplete_day = (
+                    (max_dt.date() < target_dt_date or (max_dt.date() == target_dt_date and (max_dt.hour < 13 or (max_dt.hour == 13 and max_dt.minute < 44))))
+                    and (now.date() > target_dt_date or (now.date() == target_dt_date and (now.hour > 13 or (now.hour == 13 and now.minute >= 45))))
+                )
+                if is_incomplete_night or is_incomplete_day:
+                    logger.info(
+                        f"偵測到 {date_str} 本機快取尚未收錄完整盤別 (快取最新時間: {max_dt})，"
+                        f"自動重新向 Shioaji API 拉取最新完整 Tick 數據..."
+                    )
                 else:
                     logger.info(f"載入本機快取 Tick 資料: {cache_file} (共 {len(cached_df):,} 筆)")
                     return cached_df

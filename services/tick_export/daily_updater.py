@@ -342,14 +342,39 @@ class DailyDataSyncService:
         latest_time = self.get_latest_recorded_time()
         logger.info(f"系統目前最新已收錄秒 K 時間戳: {latest_time}")
 
-        # 3. 下載、重採樣與增量篩選
-        df_new = self.fetch_and_resample(
-            api=api,
-            contract=contract,
-            target_date=sync_date,
-            latest_time=latest_time,
-            force_refresh=force_refresh
-        )
+        # 3. 決定欲同步之交易日清單（若未指定單一 target_date 且存在跨日缺口，自動補齊區間內所有營業日）
+        dates_to_sync: List[str] = [sync_date]
+        if target_date is None and latest_time:
+            try:
+                latest_dt = pd.to_datetime(latest_time).to_pydatetime()
+                start_trade_date = self.get_taifex_trading_date(latest_dt)
+                if start_trade_date < sync_date:
+                    b_dates = pd.bdate_range(start=start_trade_date, end=sync_date)
+                    dates_to_sync = [d.strftime("%Y-%m-%d") for d in b_dates]
+                    if sync_date not in dates_to_sync:
+                        dates_to_sync.append(sync_date)
+                    logger.info(f"偵測到跨交易日增量區間，將依序同步交易日: {dates_to_sync}")
+            except Exception as e:
+                logger.warning(f"計算跨日補齊區間時發生警告 ({e})，維持單日同步: {sync_date}")
+
+        # 4. 下載、重採樣與增量篩選
+        dfs_collected: List[pd.DataFrame] = []
+        for d_str in dates_to_sync:
+            df_part = self.fetch_and_resample(
+                api=api,
+                contract=contract,
+                target_date=d_str,
+                latest_time=latest_time,
+                force_refresh=force_refresh if d_str == sync_date else False
+            )
+            if not df_part.empty:
+                dfs_collected.append(df_part)
+
+        if dfs_collected:
+            df_new = pd.concat(dfs_collected, ignore_index=True)
+            df_new = df_new.drop_duplicates(subset=["時間"]).sort_values(by="時間").reset_index(drop=True)
+        else:
+            df_new = pd.DataFrame(columns=["時間", "開盤價", "最高價", "最低價", "收盤價", "成交量"])
 
         delta_count = len(df_new)
         if delta_count == 0:
