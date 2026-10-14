@@ -236,7 +236,7 @@ class TickExporter:
         logger.info(f"Excel 檔案寫入完成！總秒數: {total_seconds:,} 筆，檔案大小: {file_size_mb:.2f} MB。")
 
         return ExportSummary(
-            symbol=contract_info.get("code", "TMFJ6"),
+            symbol=contract_info.get("code", "TMFR1"),
             contract_name=contract_info.get("name", "微台10"),
             start_date=daily_second_dfs[0][0] if daily_second_dfs else "",
             end_date=daily_second_dfs[-1][0] if daily_second_dfs else "",
