@@ -92,7 +92,7 @@ def run_daily_sync(
         return {"status": "FAILED", "error": error_msg}
 
     print("\n" + "=" * 65)
-    print("      微台10 (TMF202610) 每日高頻秒 K 線自動增量同步系統")
+    print("      微台10 (TMFR1 近月連續合約) 每日高頻秒 K 線自動增量同步系統")
     print("=" * 65)
 
     import shioaji as sj
@@ -113,7 +113,7 @@ def run_daily_sync(
         if dry_run:
             logger.info("【預演模式已啟動】將不異動任何既有檔案與資料庫記錄。")
             latest_time = service.get_latest_recorded_time()
-            contract = api.Contracts.Futures.TMF.get("TMFJ6")
+            contract = service.resolve_near_month_contract(api)
             sync_date = target_date or DailyDataSyncService.get_taifex_trading_date()
             df_new = service.fetch_and_resample(
                 api=api,
@@ -142,6 +142,8 @@ def run_daily_sync(
         print(f"  狀態               : {result.get('status')}")
         print(f"  目標交易日         : {result.get('date')}")
         if result.get("status") == "SUCCESS":
+            print(f"  資料來源合約       : {result.get('contract')} (近月連續)")
+            print(f"  寫入實體合約       : {', '.join(result.get('physical_contracts', []))}")
             print(f"  新增秒 K 筆數      : {result.get('new_bars_count', 0):>10,} 筆")
             print(f"  資料時序起點       : {result.get('new_range_start')}")
             print(f"  資料時序終點       : {result.get('new_range_end')}")
