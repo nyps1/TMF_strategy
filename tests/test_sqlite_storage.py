@@ -83,6 +83,26 @@ class TestSQLiteStorage(unittest.TestCase):
         self.assertEqual(summary["total_rows"], 1)
         self.assertEqual(summary["total_volume"], 25)
 
+    def test_default_query_is_continuous_near_month_chain(self):
+        """預設 (TMFR1) 為近月連續資料：跨越換月之各合約依時間串接；指定實體代碼則僅回傳該合約。"""
+        def _frame(times):
+            n = len(times)
+            return pd.DataFrame({
+                "時間": times, "開盤價": [1.0] * n, "最高價": [2.0] * n,
+                "最低價": [0.5] * n, "收盤價": [1.5] * n, "成交量": [1] * n,
+            })
+
+        self.manager.insert_second_bars(_frame(["2026-10-21 13:29:58"]), symbol="TMFJ6")
+        self.manager.insert_second_bars(_frame(["2026-10-21 15:00:01"]), symbol="TMFK6")
+
+        whole_chain = self.manager.query_bars_by_time_range("2026-10-21 00:00:00", "2026-10-22 00:00:00")
+        self.assertEqual(list(whole_chain["時間"]), ["2026-10-21 13:29:58", "2026-10-21 15:00:01"])
+
+        only_oct = self.manager.query_bars_by_time_range(
+            "2026-10-21 00:00:00", "2026-10-22 00:00:00", symbol="TMFJ6"
+        )
+        self.assertEqual(list(only_oct["時間"]), ["2026-10-21 13:29:58"])
+
 
 if __name__ == "__main__":
     unittest.main()

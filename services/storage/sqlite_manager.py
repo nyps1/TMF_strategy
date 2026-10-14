@@ -168,7 +168,7 @@ class SQLiteManager:
         self,
         start_time: str,
         end_time: str,
-        symbol: str = "TMFJ6"
+        symbol: str = HISTORY_SYMBOL
     ) -> pd.DataFrame:
         """
         透過 B-Tree 索引高效檢索指定時間區間之秒 K 線。
@@ -176,19 +176,25 @@ class SQLiteManager:
         參數:
             start_time (str): 起始時間 (格式: YYYY-MM-DD HH:MM:SS)。
             end_time (str): 結束時間 (格式: YYYY-MM-DD HH:MM:SS)。
-            symbol (str): 商品代碼，預設 'TMFJ6'。
+            symbol (str): 商品代碼，預設 HISTORY_SYMBOL ('TMFR1')。
+                TMFR1 代表近月連續合約，即「全部資料」(歷史回補列與各實體合約依時間串接)，不加 symbol 過濾，
+                因此跨越到期日換月後仍可取得連續資料；指定實體合約代碼 (如 'TMFJ6') 則僅回傳該合約之列。
 
         返回:
             pd.DataFrame: 檢索所得之秒 K 線 DataFrame。
         """
-        query_sql = """
-            SELECT time AS 時間, open AS 開盤價, high AS 最高價, low AS 最低價, close AS 收盤價, volume AS 成交量
-            FROM tmf10_second_bars
-            WHERE symbol = ? AND time >= ? AND time <= ?
-            ORDER BY time ASC;
-        """
+        select_sql = (
+            "SELECT time AS 時間, open AS 開盤價, high AS 最高價, low AS 最低價, "
+            "close AS 收盤價, volume AS 成交量 FROM tmf10_second_bars "
+        )
+        if symbol == HISTORY_SYMBOL:
+            query_sql = select_sql + "WHERE time >= ? AND time <= ? ORDER BY time ASC;"
+            params: tuple = (start_time, end_time)
+        else:
+            query_sql = select_sql + "WHERE symbol = ? AND time >= ? AND time <= ? ORDER BY time ASC;"
+            params = (symbol, start_time, end_time)
         with self._get_connection() as conn:
-            df = pd.read_sql_query(query_sql, conn, params=(symbol, start_time, end_time))
+            df = pd.read_sql_query(query_sql, conn, params=params)
             return df
 
     def get_summary(self) -> Dict[str, Any]:
