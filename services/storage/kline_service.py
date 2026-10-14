@@ -13,6 +13,8 @@ from typing import Dict, List, Any, Optional
 import pandas as pd
 import numpy as np
 
+from .sqlite_manager import HISTORY_SYMBOL
+
 logger = logging.getLogger("KlineService")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -53,14 +55,18 @@ class KlineService:
         "1D": "1 日"
     }
 
-    def __init__(self, db_path: str = "data/market_data.db") -> None:
+    def __init__(self, db_path: str = "data/market_data.db", include_history: bool = False) -> None:
         """
         初始化 K 線服務。
 
         參數:
             db_path (str): SQLite 資料庫檔案路徑。
+            include_history (bool): 是否納入歷史回補區段 (symbol == HISTORY_SYMBOL，Shioaji 近月連續合約)。
+                預設 False，僅載入每日增量同步之實體合約資料，使儀表板與回測範圍不因歷史回補而膨脹；
+                設為 True 則載入全部歷史 (資料量可達千萬筆秒 K，需預留足夠記憶體)。
         """
         self.db_path = os.path.abspath(db_path)
+        self.include_history = include_history
         self._cache_1m: Optional[pd.DataFrame] = None
         self._cache_intervals: Dict[str, List[Dict[str, Any]]] = {}
 
@@ -84,14 +90,25 @@ class KlineService:
         if self._cache_1m is not None:
             return self._cache_1m
 
-        logger.info(f"從 SQLite 資料庫載入秒 K 線: {self.db_path}...")
+        scope = "含歷史回補" if self.include_history else "不含歷史回補 (僅實體合約增量資料)"
+        logger.info(f"從 SQLite 資料庫載入秒 K 線 ({scope}): {self.db_path}...")
         with self._get_connection() as conn:
-            query = """
-                SELECT time, open, high, low, close, volume
-                FROM tmf10_second_bars
-                ORDER BY time ASC;
-            """
-            df = pd.read_sql_query(query, conn)
+            if self.include_history:
+                query = """
+                    SELECT time, open, high, low, close, volume
+                    FROM tmf10_second_bars
+                    ORDER BY time ASC;
+                """
+                params: tuple = ()
+            else:
+                query = """
+                    SELECT time, open, high, low, close, volume
+                    FROM tmf10_second_bars
+                    WHERE symbol <> ?
+                    ORDER BY time ASC;
+                """
+                params = (HISTORY_SYMBOL,)
+            df = pd.read_sql_query(query, conn, params=params)
 
         if df.empty:
             raise ValueError("Status: ERROR | Root Cause: tmf10_second_bars 資料表為空 | Suggested Fix: 確認資料庫寫入成功。")

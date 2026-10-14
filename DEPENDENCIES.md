@@ -22,6 +22,23 @@
 | websockets   | == 13.1  | 全雙工 WebSocket 協定核心函式庫，支撐即時行情與策略訊號推播。 |
 | lightweight-charts | == 5.2.0 | 前端專業級 TradingView 高頻 K 線與 Baseline 走勢圖 Canvas 渲染引擎。 |
 
+## 歷史回補功能之依賴說明
+歷史 Tick 回補（`backfill_history_tmf.py`、`services/tick_export/history_backfill.py`、`services/tick_export/monthly_excel.py`）**未新增任何外部套件**，僅重用上表既有依賴：
+
+| Package Name | Version | Purpose（於回補功能中的用途） |
+|--------------|---------|---------|
+| shioaji      | == 1.3.1 | `api.ticks()` 取得 `TMFR1` 歷史 Tick；`api.usage()` 查詢每日流量；`login(fetch_contract=False)` 輕量登入。 |
+| pandas       | == 2.2.1 | Tick 重採樣為 1 秒 OHLCV、邊界時間過濾。 |
+| pyarrow      | == 25.0.1 | 每日原始 Tick Parquet 快取（`data/ticks_cache/TMFR1_YYYY-MM-DD_ticks.parquet`）。 |
+| xlsxwriter   | == 3.2.9 | 常數記憶體串流寫入「一月一工作表」Excel。 |
+| openpyxl     | == 3.1.5 | 偵測舊版 Excel 版型（僅讀取工作表名稱）；單元測試驗證輸出內容。 |
+| python-dotenv| == 1.0.1 | 載入 `.env` 之 Shioaji 金鑰。 |
+
+系統層級條件：
+- **Shioaji 每日流量**：預設 500 MB（近 30 日 API 成交為 0 之帳戶），開盤日 08:00 重置；每筆 Tick 計 40 Bytes。全量回補約需 5 ~ 7 個開盤日分批完成。
+- **磁碟空間**：SQLite 全量歷史約 2 GB、Tick 快取約 1 GB、Excel 約 0.4 GB，建議預留 5 GB 以上。
+- **記憶體**：回補與 Excel 匯出皆為串流/分塊處理，峰值與總筆數無關（僅取決於 `chunk_size`）；載入全歷史做長期回測（`include_history=True`）則需 4 GB 以上可用記憶體。
+
 ## 系統與容器環境依賴
 - **Python 版本**: 推薦使用 Python 3.8 ~ 3.12
 - **Node.js 版本**: 推薦使用 Node.js 18.0 + (用於 npm 安裝前端靜態依賴)

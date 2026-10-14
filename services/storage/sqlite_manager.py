@@ -18,6 +18,11 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# 歷史回補資料之 symbol 標記：Shioaji 近月連續合約 (TMFR1)。
+# 以獨立 symbol 與每日增量同步寫入之實體合約代碼 (如 TMFJ6) 區隔，
+# 讓下游 KlineService 可依 include_history 旗標決定是否納入歷史回補區段。
+HISTORY_SYMBOL: str = "TMFR1"
+
 
 class SQLiteManager:
     """

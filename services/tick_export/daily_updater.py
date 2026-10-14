@@ -18,11 +18,11 @@ import logging
 from typing import Optional, Dict, Any, Tuple, List
 from datetime import datetime, date
 import pandas as pd
-import openpyxl
 
 from services.storage import SQLiteManager
 from services.tick_export.exporter import TickExporter
 from services.tick_export.models import ExportConfig
+from services.tick_export.monthly_excel import MonthlyExcelExporter
 
 logger = logging.getLogger(__name__)
 
@@ -137,68 +137,36 @@ class DailyDataSyncService:
 
     def append_to_excel(self, df_new: pd.DataFrame) -> int:
         """
-        以增量（Append）模式將全新秒 K 線寫入現有 Excel 檔案。
-        若列數即將超過 Excel 單表上限（1,048,576 列），自動開闢新分頁接續寫入。
+        將新增秒 K 反映至 Excel 活頁簿（一月一工作表版型）。
+
+        設計說明：xlsx 為 zip 封裝之 XML，無法就地追加列；歷史回補後活頁簿達數百 MB，
+        以 openpyxl 載入既有檔案追加會耗盡記憶體。因此改以 SQLite（資料已於前一步寫入）為唯一資料來源，
+        委由 MonthlyExcelExporter 以 constant_memory 串流全量重建並原子替換，結果冪等且記憶體用量恆定。
 
         參數:
-            df_new (pd.DataFrame): 欲追加之秒 K 線 DataFrame。
+            df_new (pd.DataFrame): 本次新增之秒 K 線 DataFrame（僅用於判斷是否有新增資料與回報筆數）。
 
         返回:
-            int: 成功追加之總列數。
+            int: 本次新增並已反映於 Excel 之秒 K 列數。
+
+        例外:
+            PermissionError: Excel 檔案被其他程式開啟鎖定時拋出（含 Status + Root Cause + Suggested Fix 說明）。
         """
         if df_new.empty:
-            logger.info("無新增數據，略過 Excel 追加作業。")
+            logger.info("無新增數據，略過 Excel 更新作業。")
             return 0
 
-        if not os.path.exists(self.excel_path):
-            logger.warning(f"未找到現有 Excel 檔案: {self.excel_path}，將全新建立檔案...")
-            # 全新建立
-            wb = openpyxl.Workbook()
-            ws = wb.active
-            ws.title = "秒K歷史紀錄"
-            headers = ["時間", "開盤價", "最高價", "最低價", "收盤價", "成交量"]
-            ws.append(headers)
-        else:
-            logger.info(f"載入既有 Excel 檔案以執行追加: {self.excel_path} ...")
-            wb = openpyxl.load_workbook(self.excel_path)
-
-        # 決定目標工作表（防溢位處理）
-        sheet_name = "秒K歷史紀錄"
-        if sheet_name not in wb.sheetnames:
-            ws = wb.active
-            ws.title = sheet_name
-        else:
-            ws = wb[sheet_name]
-
-        # 檢查工作表容量邊界
-        max_excel_rows = 1048500
-        current_rows = ws.max_row
-        if current_rows + len(df_new) > max_excel_rows:
-            # 建立溢位接續工作表
-            overflow_sheet_name = f"秒K歷史紀錄_{len(wb.sheetnames) + 1}"
-            logger.warning(f"目前工作表列數 ({current_rows:,}) 接近 Excel 上限，建立新分頁: {overflow_sheet_name}")
-            ws = wb.create_sheet(title=overflow_sheet_name)
-            ws.append(["時間", "開盤價", "最高價", "最低價", "收盤價", "成交量"])
-
-        # 批次追加資料列
-        logger.info(f"正在向 Excel 追加 {len(df_new):,} 筆資料列...")
-        rows_data = df_new[["時間", "開盤價", "最高價", "最低價", "收盤價", "成交量"]].values.tolist()
-        for row in rows_data:
-            ws.append(row)
-
+        logger.info(f"正在由 SQLite 重建月份分頁 Excel: {self.excel_path} ...")
+        exporter = MonthlyExcelExporter(db_path=self.db_path, excel_path=self.excel_path)
         try:
-            wb.save(self.excel_path)
-            wb.close()
-            logger.info(f"Excel 追加儲存成功！累計總列數: {ws.max_row:,} 列。")
-        except PermissionError:
-            err_msg = (
-                f"Status: ERROR | Root Cause: 無法儲存 Excel 檔案 ({self.excel_path})，"
-                f"檔案可能正被 Excel 或其他程式開啟佔用鎖定 | "
-                f"Suggested Fix: 請關閉正在檢視該檔案之 Excel 應用程式後重新執行排程。"
-            )
-            logger.error(err_msg)
-            raise PermissionError(err_msg)
-
+            summary = exporter.export()
+        except PermissionError as e:
+            logger.error(str(e))
+            raise
+        logger.info(
+            f"Excel 更新完成：{len(summary['sheets'])} 個月份工作表、累計 {summary['total_rows']:,} 列、"
+            f"{summary['file_size_mb']:.1f} MB (耗時 {summary['duration_seconds']} 秒)。"
+        )
         return len(df_new)
 
     def append_to_parquet(self, df_new: pd.DataFrame) -> int:
