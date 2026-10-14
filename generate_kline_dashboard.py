@@ -2112,7 +2112,7 @@ def build_html_content(
     <div class="top-toolbar">
         <div class="symbol-badge">
             <span class="symbol-name">微型台指期 10</span>
-            <span class="symbol-code">TMFJ6</span>
+            <span class="symbol-code">TMFR1</span>
 
             <!-- 策略即時切換按鈕群組 (快捷鍵 1/2/3) -->
             <div class="strategy-selector-group">
@@ -2207,7 +2207,7 @@ def build_html_content(
             </div>
 
             <div id="kline-container"></div>
-            <div class="watermark">TMF202610 • QUANTITATIVE WORKBENCH</div>
+            <div class="watermark">TMFR1 NEAR-MONTH • QUANTITATIVE WORKBENCH</div>
         </div>
 
         <!-- 可拖曳上下分割條 (雙圖模式下可拉動調整 K 線與數據區高度比例) -->
