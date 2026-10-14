@@ -207,7 +207,7 @@ async def get_micro_taiwan_summary_endpoint() -> dict:
 async def get_micro_taiwan_second_bars_endpoint(
     start_time: str = "2026-09-16 08:45:00",
     end_time: str = "2026-09-16 09:00:00",
-    symbol: str = "TMFJ6"
+    symbol: str = "TMFR1"
 ) -> dict:
     """
     查詢指定時間區間內微台10秒 K 線資料 API 路由端點。
@@ -216,7 +216,8 @@ async def get_micro_taiwan_second_bars_endpoint(
     參數:
         start_time (str): 查詢起始時間字串 (格式: YYYY-MM-DD HH:MM:SS)。
         end_time (str): 查詢結束時間字串 (格式: YYYY-MM-DD HH:MM:SS)。
-        symbol (str): 商品代碼，預設 'TMFJ6'。
+        symbol (str): 商品代碼，預設 'TMFR1' (近月連續合約，跨換月串接全部資料)；
+            指定實體合約代碼 (如 'TMFJ6') 則僅回傳該合約之列。
 
     返回:
         dict: 包含 status, data (列數與紀錄陣列), message 之標準化 JSON 回應。
@@ -293,7 +294,7 @@ async def get_kline_endpoint(
             "status": "SUCCESS",
             "message": f"Successfully retrieved {len(bars)} bars for interval '{interval}'.",
             "data": {
-                "symbol": "TMFJ6",
+                "symbol": "TMFR1",
                 "symbol_name": "微台10",
                 "interval": interval,
                 "count": len(bars),
