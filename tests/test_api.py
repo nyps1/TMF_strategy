@@ -109,7 +109,7 @@ class TestAPIEndpoints(unittest.TestCase):
             cfg_res = loop.run_until_complete(get_strategy_config_endpoint())
             self.assertEqual(cfg_res.get("status"), "SUCCESS")
             data = cfg_res.get("data", {})
-            self.assertEqual(data.get("symbol"), "TMFJ6")
+            self.assertEqual(data.get("symbol"), "TMFR1")
             self.assertIn("bb_length", data)
 
             # 2. 更新策略參數 (例如決策者調整布林週期為 25)

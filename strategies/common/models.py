@@ -59,7 +59,7 @@ class StrategyConfig(BaseModel):
     所有回測假設、指標長度、停利停損倍數與風控參數皆在此統一設定。
     """
     strategy_name: str = "布林動能突破"
-    symbol: str = "TMFJ6"
+    symbol: str = "TMFR1"
     interval: str = "5m"
 
     # 指標與形態參數 (決策者可自由調整)
