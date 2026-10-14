@@ -35,3 +35,4 @@ shioaji.log
 ~$*.xls
 *.lock
 archive/temp_edge_profile*/
+.gh_pages_deploy/

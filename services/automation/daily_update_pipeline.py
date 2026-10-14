@@ -141,6 +141,33 @@ class DailyUpdatePipeline:
             logger.error(f"HTML 產出失敗: {e}", exc_info=True)
             return {"step": "html", "status": "FAILED", "error": str(e)}
 
+    def run_pages_deploy_step(self) -> Dict[str, Any]:
+        """
+        步驟四：將最新編譯完成之 `kline_dashboard.html` 自動推送發布至 GitHub Pages。
+
+        返回:
+            Dict[str, Any]: GitHub Pages 部署結果摘要。
+        """
+        logger.info("【管線步驟 4/4】開始同步發布 HTML 儀表板至 GitHub Pages...")
+        start_t = time.time()
+        try:
+            from services.automation.github_pages_publisher import GitHubPagesPublisher
+            publisher = GitHubPagesPublisher()
+            res = publisher.publish_dashboard(html_source_path=self.html_path)
+            elapsed = time.time() - start_t
+            if res.get("status") == "SUCCESS":
+                logger.info(
+                    f"GitHub Pages 同步發布成功: {res.get('public_url')} (耗時 {elapsed:.2f}s)"
+                )
+            else:
+                logger.warning(f"GitHub Pages 同步發布異常: {res}")
+            res["step"] = "pages_deploy"
+            res["elapsed_seconds"] = round(elapsed, 2)
+            return res
+        except Exception as e:
+            logger.warning(f"GitHub Pages 自動發布遭遇非致命異常 ({e})，保留本機 HTML 產出。")
+            return {"step": "pages_deploy", "status": "DEGRADED", "error": str(e)}
+
     def execute_pipeline(self) -> Dict[str, Any]:
         """
         執行整套每日定時更新流水線。
@@ -155,6 +182,7 @@ class DailyUpdatePipeline:
         sync_res = self.run_sync_step()
         excel_res = self.run_excel_step()
         html_res = self.run_html_step()
+        pages_res = self.run_pages_deploy_step()
 
         total_elapsed = time.time() - total_start
         all_success = (excel_res.get("status") == "SUCCESS") and (html_res.get("status") == "SUCCESS")
@@ -165,7 +193,8 @@ class DailyUpdatePipeline:
             "total_elapsed_seconds": round(total_elapsed, 2),
             "sync_step": sync_res,
             "excel_step": excel_res,
-            "html_step": html_res
+            "html_step": html_res,
+            "pages_step": pages_res
         }
 
         logger.info(

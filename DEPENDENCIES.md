@@ -42,6 +42,16 @@
 ## 系統與容器環境依賴
 - **Python 版本**: 推薦使用 Python 3.8 ~ 3.12
 - **Node.js 版本**: 推薦使用 Node.js 18.0 + (用於 npm 安裝前端靜態依賴)
+- **Git 版本**: 推薦使用 Git 2.35 + (用於 `services/automation/github_pages_publisher.py` 自動推送靜態 HTML 至 GitHub Pages)
+
+## GitHub Pages 自動發布模組之依賴說明
+靜態儀表板自動發布服務（`services/automation/github_pages_publisher.py`）僅使用 Python 標準函式庫（`urllib.request`、`subprocess`、`shutil`、`json`）與系統層級之 `git` CLI，**未新增任何外部第三方套件**：
+
+| Package Name | Version | Purpose（於自動發布模組中的用途） |
+|--------------|---------|---------|
+| lightweight-charts | == 5.2.0 | 內嵌於 `kline_dashboard.html` 之獨立前端 K 線與指標圖表渲染核心。 |
+| pandas       | == 2.2.1 | 產出 11 種時間週期 K 棒與「布林_ATR基準」策略回測時序。 |
+| numpy        | == 1.26.4 | 向量化布林通道與 ATR 指標計算。 |
 
 ## 安裝指令
 
@@ -56,5 +66,3 @@ pip install -r requirements.txt
 ```bash
 cd frontend && npm install lightweight-charts
 ```
-
-
