@@ -53,6 +53,15 @@
 | pandas       | == 2.2.1 | 產出 11 種時間週期 K 棒與「布林_ATR基準」策略回測時序。 |
 | numpy        | == 1.26.4 | 向量化布林通道與 ATR 指標計算。 |
 
+## 基準 A 保證金維持率風控與 RWD 響應式網頁之依賴說明
+後端保證金維持率風控引擎（`services/backtest/models.py`、`services/backtest/engine.py`）與前端雙引擎同步暨 RWD 響應式介面（`generate_kline_dashboard.py`）僅使用 Python 標準函式庫（`math`、`dataclasses`、`typing`）與原生 CSS3 Media Queries，**未新增任何外部第三方套件**：
+
+| Package Name | Version | Purpose（於風控與 RWD 模組中的用途） |
+|--------------|---------|---------|
+| pandas       | == 2.2.1 | 彙整每筆交易之合約總價值、動態真實槓桿與整戶維持率並匯出 `trades_atr.csv`。 |
+| numpy        | == 1.26.4 | 向量化布林通道與 ATR 指標運算，支撐基準 A 動態口數回測。 |
+| lightweight-charts | == 5.2.0 | 配合 `ResizeObserver` 與 CSS Media Queries 支援平板（`1024px`）與手機（`768px`）RWD 自適應圖表縮放。 |
+
 ## 安裝指令
 
 請於 Python 環境中執行以下指令以安裝依賴：
@@ -66,3 +75,4 @@ pip install -r requirements.txt
 ```bash
 cd frontend && npm install lightweight-charts
 ```
+

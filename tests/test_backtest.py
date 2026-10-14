@@ -69,6 +69,49 @@ class TestBacktestEngine(unittest.TestCase):
         qty_low = self.engine._calculate_safe_qty(20000.0)
         self.assertEqual(qty_low, 0)
 
+    def test_margin_ratio_130_and_dynamic_leverage(self):
+        """驗證基準 A (130% 整戶原始保證金維持率, 單口門檻 45,565 元) 與動態浮動槓桿計算"""
+        cfg_130 = BacktestConfig(
+            initial_capital=105150.0,
+            point_value=10.0,
+            margin_req=35050.0,
+            maint_margin=26900.0,
+            min_margin_ratio=1.30,
+            position_sizing_mode="margin_ratio_130"
+        )
+        eng_130 = BacktestEngine(config=cfg_130)
+
+        # 1. 期初本金 105,150 元 -> floor(105,150 / 45,565) = 2 口 (維持率 150.0% >= 130%)
+        self.assertEqual(eng_130._calculate_safe_qty(45980.0), 2)
+
+        # 2. 當權益成長至 136,695 元 (45,565 * 3) -> 自動晉升為 3 口
+        eng_130.equity = 136695.0
+        self.assertEqual(eng_130._calculate_safe_qty(45980.0), 3)
+
+        # 3. 當權益回落至 90,000 元 -> 自動降為 1 口
+        eng_130.equity = 90000.0
+        self.assertEqual(eng_130._calculate_safe_qty(45980.0), 1)
+
+        # 4. 當權益跌破 45,565 元 (如 45,000 元，維持率不足 130%) -> 嚴格回傳 0 口禁止開倉
+        eng_130.equity = 45000.0
+        self.assertEqual(eng_130._calculate_safe_qty(45980.0), 0)
+
+        # 5. 驗證進場價 45,980 點、2 口時之總合約價值 (919,600 元)、動態真實槓桿 (8.75 倍) 與維持率 (150.0%)
+        eng_130.equity = 105150.0
+        eng_130.position.side = PositionSide.LONG
+        eng_130.position.qty = 2
+        eng_130.position.entry_price = 45980.0
+        eng_130.position.entry_time = "2026-08-01 09:00:00"
+        eng_130._close_position(
+            exit_time="2026-08-01 09:30:00",
+            raw_exit_price=46000.0,
+            reason=ExitReason.ATR_TAKE_PROFIT
+        )
+        t = eng_130.trades[0]
+        self.assertEqual(t.contract_value, 919600.0)
+        self.assertAlmostEqual(t.effective_leverage, 8.75, places=2)
+        self.assertAlmostEqual(t.margin_ratio_pct, 150.0, places=2)
+
     def test_indicator_calculation(self):
         """驗證布林通道與 ATR 序列長度與數值正確性"""
         dates = pd.date_range("2024-01-01", periods=45, freq="5min")

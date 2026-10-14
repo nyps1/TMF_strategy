@@ -348,6 +348,9 @@ def run_single_strategy_backtest(
             "cum_pnl": round(running_cum_pnl, 2),
             "return_pct": float(t.return_pct),
             "equity_after": float(t.equity_after),
+            "contract_value": float(t.contract_value),
+            "effective_leverage": float(t.effective_leverage),
+            "margin_ratio_pct": float(t.margin_ratio_pct),
             "entry_ts": ent_ts,
             "exit_ts": ext_ts,
             "hold_mins": hold_mins
@@ -424,7 +427,7 @@ def run_single_strategy_backtest(
 
 def run_all_strategies_backtest(bars_5m: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    針對 5 分 K 線執行布林動能突破 (ATR 基準) 策略回測。
+    針對 5 分 K 線執行布林動能突破 (ATR 基準 + 130% 整戶維持率控管) 策略回測。
 
     參數:
         bars_5m (List[Dict[str, Any]]): 5 分鐘 K 線資料列表。
@@ -443,6 +446,10 @@ def run_all_strategies_backtest(bars_5m: List[Dict[str, Any]]) -> Dict[str, Any]
         bb_length=30,
         bb_mult=1.75,
         initial_capital=105150.0,
+        margin_req=35050.0,
+        maint_margin=26900.0,
+        min_margin_ratio=1.30,
+        position_sizing_mode="margin_ratio_130",
         commission_per_order=18.0,
         tax_rate=0.00002
     )
@@ -2026,6 +2033,196 @@ def build_html_content(
             from {{ transform: translateX(100%); opacity: 0; }}
             to {{ transform: translateX(0); opacity: 1; }}
         }}
+
+        /* =========================================================
+           RWD 響應式網頁設計 (支援平板 iPad / 手機 iPhone & Android)
+           ========================================================= */
+        @media (max-width: 1024px) {{
+            .top-toolbar {{
+                height: auto;
+                min-height: 46px;
+                flex-wrap: wrap;
+                padding: 6px 10px;
+                gap: 6px;
+            }}
+            .timeframe-group, .actions-group {{
+                overflow-x: auto;
+                max-width: 100%;
+                -webkit-overflow-scrolling: touch;
+                padding-bottom: 2px;
+            }}
+            .metrics-grid {{
+                grid-template-columns: repeat(3, 1fr);
+                gap: 8px;
+            }}
+            .metric-col:nth-child(3n) {{
+                border-right: none;
+            }}
+            .kpi-card-body {{
+                grid-template-columns: repeat(4, 1fr);
+                gap: 6px 10px;
+            }}
+            .perf-header-bar {{
+                height: auto;
+                min-height: 38px;
+                flex-wrap: wrap;
+                padding: 6px 12px;
+                gap: 8px;
+            }}
+            .perf-title-group, .perf-tab-list, .perf-tools {{
+                overflow-x: auto;
+                max-width: 100%;
+                -webkit-overflow-scrolling: touch;
+                flex-wrap: nowrap;
+                white-space: nowrap;
+            }}
+            .analytics-top-grid {{
+                grid-template-columns: 1fr;
+            }}
+            .multi-legend-bar, .trades-filter-bar, .trade-chart-header-info {{
+                height: auto;
+                min-height: 32px;
+                flex-wrap: wrap;
+                padding: 6px 12px;
+                gap: 6px;
+            }}
+        }}
+
+        @media (max-width: 768px) {{
+            body {{
+                height: auto;
+                min-height: 100vh;
+                overflow-y: auto;
+                overflow-x: hidden;
+            }}
+            .workspace-split {{
+                height: auto;
+                min-height: calc(100vh - 90px);
+                overflow: visible;
+            }}
+            .kline-section {{
+                flex: none;
+                height: 52vh;
+                min-height: 340px;
+            }}
+            .split-resizer {{
+                display: none !important;
+            }}
+            .performance-section {{
+                flex: none;
+                height: auto;
+                min-height: 580px;
+            }}
+            .workspace-split.solo-data-mode .performance-section {{
+                height: auto !important;
+                min-height: calc(100vh - 90px) !important;
+            }}
+            .multi-canvas-viewport, .canvas-scroll-viewport, .perf-chart-container-wrapper {{
+                min-height: 360px !important;
+                height: 52vh !important;
+                flex: none;
+            }}
+            .metrics-card {{
+                padding: 8px 12px;
+            }}
+            .metrics-header-row {{
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 4px;
+            }}
+            .metrics-title {{
+                flex-wrap: wrap;
+                gap: 6px;
+            }}
+            .shortcut-hint-bar {{
+                display: none;
+            }}
+            .metrics-grid {{
+                grid-template-columns: repeat(2, 1fr);
+                gap: 8px;
+            }}
+            .metric-col {{
+                border-right: none;
+                background: #151821;
+                padding: 6px 8px;
+                border-radius: 5px;
+                border: 1px solid #1f2433;
+            }}
+            .metric-main-value {{
+                font-size: 13px;
+            }}
+            .multi-kpi-matrix {{
+                padding: 8px 12px;
+            }}
+            .kpi-card-header {{
+                flex-wrap: wrap;
+                gap: 4px;
+            }}
+            .kpi-card-body {{
+                grid-template-columns: repeat(2, 1fr);
+                gap: 6px 10px;
+            }}
+            .ohlc-legend {{
+                top: 6px;
+                left: 6px;
+                right: 6px;
+                padding: 4px 8px;
+                font-size: 10px;
+                gap: 5px;
+                max-width: calc(100% - 12px);
+            }}
+            .trade-focus-banner {{
+                top: auto;
+                bottom: 8px;
+                width: 94%;
+                justify-content: space-between;
+                font-size: 11px;
+                padding: 5px 8px;
+                overflow-x: auto;
+            }}
+            .params-modal-card {{
+                width: 96vw;
+                max-width: 96vw;
+                max-height: 92vh;
+                border-radius: 10px;
+            }}
+            .params-modal-header, .params-modal-body, .params-modal-footer {{
+                padding: 12px 14px;
+            }}
+            .params-grid {{
+                grid-template-columns: 1fr;
+                gap: 10px;
+            }}
+            .presets-bar {{
+                flex-direction: column;
+                align-items: flex-start;
+            }}
+            .params-modal-footer {{
+                flex-direction: column;
+                gap: 8px;
+                align-items: stretch;
+            }}
+            .params-actions, .btn-run-backtest, .btn-reset-params {{
+                width: 100%;
+                justify-content: center;
+            }}
+            .trades-table th:first-child,
+            .trades-table td:first-child {{
+                position: sticky;
+                left: 0;
+                background: #141720;
+                z-index: 3;
+            }}
+            .toast-container {{
+                right: 10px;
+                left: 10px;
+                bottom: 12px;
+            }}
+            .toast-card {{
+                min-width: auto;
+                width: 100%;
+            }}
+        }}
     </style>
 </head>
 <body>
@@ -2215,7 +2412,7 @@ def build_html_content(
                     </div>
                 </div>
                 <div class="perf-tools">
-                    <button class="perf-tool-btn gold-preset" id="btn-quick-best-preset" title="一鍵套用布林_ATR基準最佳化參數組合 (滿倉 3 口模式)">套用最佳化參數組合</button>
+                    <button class="perf-tool-btn gold-preset" id="btn-quick-best-preset" title="一鍵套用布林_ATR基準最佳化參數組合 (基準A：130%維持率 + 動態浮動槓桿)">套用最佳化參數組合</button>
                     <button class="perf-tool-btn highlight" id="btn-open-params-modal" title="微調策略參數並即時重新撮合回測">策略參數調校與即時回測</button>
                     <button class="perf-tool-btn" id="btn-toggle-compare-mode" title="切換累積損益、帳戶淨值或水下回撤圖">切換視圖模式</button>
                     <button class="perf-tool-btn" id="btn-fit-chart" title="適配全屏">適配縮放</button>
@@ -2434,6 +2631,8 @@ def build_html_content(
                                 <th>出場價格</th>
                                 <th>持倉時間</th>
                                 <th>口數</th>
+                                <th>合約總價值</th>
+                                <th>動態槓桿 (維持率)</th>
                                 <th>出場原因</th>
                                 <th>手續費+稅</th>
                                 <th>淨損益 (TWD)</th>
@@ -2467,9 +2666,9 @@ def build_html_content(
                 <!-- 快速參數預設集橫幅 -->
                 <div class="presets-bar">
                     <span style="font-size:12px; font-weight:700; color:#f0b90b;">快速參數配置集 (Presets)：</span>
-                    <div style="display:flex; gap:8px;">
-                        <button class="preset-btn gold" id="btn-apply-best-preset" title="套用布林_ATR基準最佳化參數組合">套用最佳化參數組合 (滿倉 3 口)</button>
-                        <button class="preset-btn" id="btn-apply-baseline-preset" title="恢復原始固定 1 口基準參數">恢復原始單口基準 (1 口)</button>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <button class="preset-btn gold" id="btn-apply-best-preset" title="套用布林_ATR基準最佳化參數組合 (基準A：130%維持率 + 動態浮動槓桿)">套用最佳化參數組合 (基準A 130%維持率)</button>
+                        <button class="preset-btn" id="btn-apply-baseline-preset" title="恢復初始基準參數 (基準A：130%維持率)">恢復初始基準參數 (基準A 130%維持率)</button>
                     </div>
                 </div>
 
@@ -2517,12 +2716,12 @@ def build_html_content(
                         <div class="param-item">
                             <div class="param-label-row">
                                 <span>部位控管模式 (Position Sizing)</span>
-                                <span class="param-val-badge" id="val-badge-sizing">預設槓桿風控</span>
+                                <span class="param-val-badge" id="val-badge-sizing">基準 A (130%維持率)</span>
                             </div>
                             <div class="param-input-row">
                                 <select class="filter-select" id="sel-sizing-mode" style="width:100%; padding:5px 8px;">
-                                    <option value="notional">名目合約槓桿風控模式 (預設基準)</option>
-                                    <option value="margin">保證金成數滿倉模式 (Margin Mode, 期初 3 口)</option>
+                                    <option value="margin_ratio_130">基準 A：整戶原始保證金維持率控管 (動態浮動槓桿)</option>
+                                    <option value="notional">名目合約槓桿上限模式 (Notional Cap)</option>
                                     <option value="fixed_one_lot">固定單口模式 (Fixed 1 Lot)</option>
                                 </select>
                             </div>
@@ -2561,20 +2760,30 @@ def build_html_content(
                     </div>
                 </div>
 
-                <!-- 區塊三：資金與交易成本 -->
+                <!-- 區塊三：資金保證金維持率與交易成本 -->
                 <div class="params-section">
                     <div class="params-section-title">
-                        <span>資金槓桿與撮合摩擦成本</span>
+                        <span>保證金維持率風控 (原始保證金 35,050 元 ｜ 維持保證金 26,900 元) 與摩擦成本</span>
                     </div>
                     <div class="params-grid">
                         <div class="param-item">
                             <div class="param-label-row">
-                                <span>最大槓桿倍數 (Max Leverage)</span>
+                                <span>最低整戶維持率門檻 (基準 A %)</span>
+                                <span class="param-val-badge" id="val-badge-margin-ratio">130% (單口 45,565 元)</span>
+                            </div>
+                            <div class="param-input-row">
+                                <input type="range" class="param-range" id="range-margin-ratio" min="100" max="250" step="5" value="130">
+                                <input type="number" class="param-num-input" id="num-margin-ratio" min="100" max="250" step="5" value="130">
+                            </div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label-row">
+                                <span>最大槓桿倍數 (僅 Notional 模式)</span>
                                 <span class="param-val-badge" id="val-badge-leverage">7.0x</span>
                             </div>
                             <div class="param-input-row">
-                                <input type="range" class="param-range" id="range-leverage" min="1.0" max="10.0" step="0.5" value="7.0">
-                                <input type="number" class="param-num-input" id="num-leverage" min="1.0" max="10.0" step="0.5" value="7.0">
+                                <input type="range" class="param-range" id="range-leverage" min="1.0" max="15.0" step="0.5" value="7.0">
+                                <input type="number" class="param-num-input" id="num-leverage" min="1.0" max="15.0" step="0.5" value="7.0">
                             </div>
                         </div>
                         <div class="param-item">
@@ -3583,6 +3792,10 @@ def build_html_content(
                 const badgeClass = isLong ? 'badge-side-long' : 'badge-side-short';
                 const sideText = isLong ? '做多' : '放空';
                 const holdMins = Math.round(t.hold_mins !== undefined ? t.hold_mins : ((t.exit_ts - t.entry_ts) / 60));
+                const contractVal = t.contract_value !== undefined ? t.contract_value : (t.entry_price * 10 * t.qty);
+                const eqBefore = (t.equity_after - t.net_pnl) > 0 ? (t.equity_after - t.net_pnl) : 105150;
+                const effLev = t.effective_leverage !== undefined ? t.effective_leverage : (contractVal / eqBefore);
+                const marginRatio = t.margin_ratio_pct !== undefined ? t.margin_ratio_pct : ((eqBefore / (t.qty * 35050)) * 100);
 
                 tr.innerHTML = `
                     <td>#${{t.trade_id}}</td>
@@ -3593,6 +3806,8 @@ def build_html_content(
                     <td style="font-weight:600;">${{t.exit_price.toFixed(1)}}</td>
                     <td style="color:#9299a8;">${{holdMins}} 分</td>
                     <td>${{t.qty}}口</td>
+                    <td style="color:#b388ff; font-weight:600;">${{Math.round(contractVal).toLocaleString('zh-TW')}}</td>
+                    <td style="color:#00e5ff; font-weight:600;">${{effLev.toFixed(2)}}x <span style="color:#9299a8; font-weight:normal;">(${{marginRatio.toFixed(0)}}%)</span></td>
                     <td><span style="color:#d1d4dc; font-weight:600;">${{t.exit_reason}}</span></td>
                     <td style="color:#787b86;">${{t.costs.toFixed(0)}}</td>
                     <td class="${{pnlClass}}">${{pnlSign}}${{t.net_pnl.toLocaleString('zh-TW', {{minimumFractionDigits: 1}})}}</td>
@@ -3612,10 +3827,14 @@ def build_html_content(
                 showToast('目前無符合條件之交易紀錄可供匯出', 'danger');
                 return;
             }}
-            const headers = ['交易編號', '策略名稱', '方向', '進場時間', '進場價格', '出場時間', '出場價格', '持倉時間(分)', '口數', '出場原因', '交易成本(TWD)', '單筆淨損益(TWD)', '累積損益(TWD)', '帳戶總淨值(TWD)'];
+            const headers = ['交易編號', '策略名稱', '方向', '進場時間', '進場價格', '出場時間', '出場價格', '持倉時間(分)', '口數', '合約總價值(TWD)', '動態真實槓桿(倍)', '整戶維持率(%)', '出場原因', '交易成本(TWD)', '單筆淨損益(TWD)', '累積損益(TWD)', '帳戶總淨值(TWD)'];
             const csvLines = [headers.join(',')];
             rows.forEach(t => {{
                 const holdMins = Math.round(t.hold_mins !== undefined ? t.hold_mins : ((t.exit_ts - t.entry_ts) / 60));
+                const contractVal = t.contract_value !== undefined ? t.contract_value : (t.entry_price * 10 * t.qty);
+                const eqBefore = (t.equity_after - t.net_pnl) > 0 ? (t.equity_after - t.net_pnl) : 105150;
+                const effLev = t.effective_leverage !== undefined ? t.effective_leverage : (contractVal / eqBefore);
+                const marginRatio = t.margin_ratio_pct !== undefined ? t.margin_ratio_pct : ((eqBefore / (t.qty * 35050)) * 100);
                 const line = [
                     t.trade_id,
                     `"${{strat.displayName}}"`,
@@ -3626,6 +3845,9 @@ def build_html_content(
                     t.exit_price.toFixed(1),
                     holdMins,
                     t.qty,
+                    Math.round(contractVal),
+                    effLev.toFixed(2),
+                    marginRatio.toFixed(1),
                     `"${{t.exit_reason}}"`,
                     t.costs.toFixed(0),
                     t.net_pnl.toFixed(1),
@@ -4782,15 +5004,18 @@ def build_html_content(
                 if (count === atrSigLen) atrSig[i] = sum / atrSigLen;
             }}
 
-            // 3. 撮合回測狀態機
+            // 3. 撮合回測狀態機 (基準 A: 130% 整戶原始保證金維持率 + 動態浮動槓桿)
             const initialCap = Number(config.initial_capital) || 105150.0;
             const pointValue = 10.0;
             const marginReq = 35050.0;
+            const maintMargin = 26900.0;
+            const minMarginRatio = Math.max(1.0, Number(config.min_margin_ratio) || 1.30);
+            const requiredPerLot = marginReq * minMarginRatio;
             const maxLeverage = Number(config.max_leverage) || 7.0;
             const commissionPerOrder = Number(config.commission) || 18.0;
             const taxRate = 0.00002;
             const slippage = Number(config.slippage) || 0.0;
-            const sizingMode = config.position_sizing_mode || 'margin';
+            const sizingMode = config.position_sizing_mode || 'margin_ratio_130';
 
             let equity = initialCap;
             let posSide = 'NONE';
@@ -4835,11 +5060,13 @@ def build_html_content(
                 const curTimeStr = datetimes[i];
                 const curTs = times[i];
 
-                // A. 進場執行 (Bar 3)
+                // A. 進場執行 (Bar 3)：嚴格執行原始保證金開倉門檻與基準 A (130% 整戶維持率)
                 if (entryReadySide !== 'NONE' && posSide === 'NONE') {{
-                    let safeQty = 1;
-                    if (sizingMode === 'fixed_one_lot') {{
-                        safeQty = 1;
+                    let safeQty = 0;
+                    if (equity < marginReq || curOpen <= 0) {{
+                        safeQty = 0;
+                    }} else if (sizingMode === 'fixed_one_lot') {{
+                        safeQty = (equity >= requiredPerLot) ? 1 : 0;
                     }} else if (sizingMode === 'notional') {{
                         const maxContractVal = equity * maxLeverage;
                         const singleContractVal = curOpen * pointValue;
@@ -4847,9 +5074,8 @@ def build_html_content(
                         const marginQty = equity / marginReq;
                         safeQty = Math.max(0, Math.floor(Math.min(theoreticalQty, marginQty)));
                     }} else {{
-                        const rawCapQty = Math.floor(equity / marginReq);
-                        const rawLevQty = Math.floor((equity * maxLeverage) / marginReq);
-                        safeQty = Math.max(1, Math.min(rawCapQty, rawLevQty));
+                        // 基準 A (margin_ratio_130 / margin)：維持率不得低於設定門檻 (預設 130% 即單口 45,565 元)，槓桿隨盤勢動態浮動
+                        safeQty = (equity >= requiredPerLot) ? Math.max(0, Math.floor(equity / requiredPerLot)) : 0;
                     }}
 
                     if (safeQty >= 1) {{
@@ -4891,6 +5117,7 @@ def build_html_content(
 
                     if (exitReason !== null) {{
                         tradeCounter++;
+                        const equityBefore = equity;
                         const actualExitPrice = (posSide === 'LONG') ? (rawExitPrice - slippage) : (rawExitPrice + slippage);
                         const grossPnl = (posSide === 'LONG')
                             ? (actualExitPrice - posEntryPrice) * pointValue * posQty
@@ -4899,10 +5126,13 @@ def build_html_content(
                         const feeTotal = commissionPerOrder * 2.0 * posQty;
                         const entryNotional = posEntryPrice * pointValue * posQty;
                         const exitNotional = actualExitPrice * pointValue * posQty;
-                        const taxTotal = Math.round(entryNotional * taxRate) + Math.round(exitNotional * taxRate);
+                        const taxTotal = Math.ceil(entryNotional * taxRate) + Math.ceil(exitNotional * taxRate);
                         const netPnl = grossPnl - feeTotal - taxTotal;
                         equity += netPnl;
                         runningCumPnl += netPnl;
+
+                        const effLeverage = equityBefore > 0 ? Math.round((entryNotional / equityBefore) * 100) / 100 : 0;
+                        const marginRatioPct = (posQty > 0 && marginReq > 0) ? Math.round((equityBefore / (posQty * marginReq)) * 1000) / 10 : 0;
 
                         let exitReasonZh = '結算';
                         if (exitReason === 'STOP_LOSS') exitReasonZh = '停損';
@@ -4924,6 +5154,9 @@ def build_html_content(
                             cum_pnl: Math.round(runningCumPnl * 100) / 100,
                             return_pct: Math.round(((actualExitPrice - posEntryPrice) / posEntryPrice * (posSide === 'LONG' ? 1 : -1) * 100) * 100) / 100,
                             equity_after: Math.round(equity * 100) / 100,
+                            contract_value: Math.round(entryNotional),
+                            effective_leverage: effLeverage,
+                            margin_ratio_pct: marginRatioPct,
                             entry_ts: times[posEntryIdx],
                             exit_ts: curTs,
                             hold_mins: holdMins
@@ -5104,7 +5337,7 @@ def build_html_content(
             }};
         }}
 
-        // 策略參數集中配置庫 (僅保留布林_ATR基準)
+        // 策略參數集中配置庫 (僅保留布林_ATR基準 + 基準 A 130% 整戶維持率控管)
         const strategyConfigs = {{
             atr: {{
                 strategy_name: '布林_ATR基準',
@@ -5114,10 +5347,11 @@ def build_html_content(
                 pullback_ratio: 0.25,
                 atr_length: 14,
                 atr_sig_length: 5,
+                min_margin_ratio: 1.30,
                 max_leverage: 7.0,
                 commission: 18.0,
                 slippage: 0.0,
-                position_sizing_mode: 'notional'
+                position_sizing_mode: 'margin_ratio_130'
             }}
         }};
         const defaultStrategyConfigs = JSON.parse(JSON.stringify(strategyConfigs));
@@ -5217,20 +5451,21 @@ def build_html_content(
                     pullback_ratio: 0.40,
                     atr_length: 14,
                     atr_sig_length: 4,
+                    min_margin_ratio: 1.30,
                     max_leverage: 8.0,
                     commission: 18.0,
                     slippage: 0.0,
-                    position_sizing_mode: 'margin'
+                    position_sizing_mode: 'margin_ratio_130'
                 }};
                 executeDynamicBacktest('atr', strategyConfigs.atr, true);
                 populateModalInputs('atr');
                 const atrPnl = STRATEGIES_DATA.atr ? STRATEGIES_DATA.atr.metrics.totalNetProfitStr : '';
-                showToast(`已一鍵套用【布林_ATR基準最佳化參數組合 (滿倉 3 口模式)】！ATR 淨利 ${{atrPnl}} TWD`, 'success');
+                showToast(`已一鍵套用【布林_ATR基準最佳化參數組合 (基準A：130%維持率 + 動態浮動槓桿)】！ATR 淨利 ${{atrPnl}} TWD`, 'success');
             }} else {{
                 strategyConfigs.atr = JSON.parse(JSON.stringify(defaultStrategyConfigs.atr));
                 executeDynamicBacktest('atr', strategyConfigs.atr, true);
                 populateModalInputs('atr');
-                showToast('已恢復布林_ATR基準策略為【原始預設基準參數】', 'info');
+                showToast('已恢復布林_ATR基準策略為【初始基準參數 (基準A：130%維持率)】', 'info');
             }}
         }}
 
@@ -5284,18 +5519,21 @@ def build_html_content(
 
             const selSizing = document.getElementById('sel-sizing-mode');
             const badgeSizing = document.getElementById('val-badge-sizing');
+            const modeVal = (cfg.position_sizing_mode === 'margin') ? 'margin_ratio_130' : (cfg.position_sizing_mode || 'margin_ratio_130');
             if (selSizing) {{
-                selSizing.value = cfg.position_sizing_mode || 'notional';
+                selSizing.value = modeVal;
             }}
             if (badgeSizing) {{
-                badgeSizing.textContent = cfg.position_sizing_mode === 'margin'
-                    ? '滿倉模式 (3口)'
-                    : (cfg.position_sizing_mode === 'fixed_one_lot' ? '固定 1 口' : '預設槓桿風控');
+                badgeSizing.textContent = modeVal === 'margin_ratio_130'
+                    ? '基準 A (維持率控管)'
+                    : (modeVal === 'fixed_one_lot' ? '固定 1 口' : '名目槓桿上限');
             }}
 
             setFieldSync('atr-len', cfg.atr_length);
             setFieldSync('atr-sig', cfg.atr_sig_length);
 
+            const ratioPct = Math.round((Number(cfg.min_margin_ratio) || 1.30) * 100);
+            setFieldSync('margin-ratio', ratioPct);
             setFieldSync('leverage', cfg.max_leverage);
             document.getElementById('num-commission').value = cfg.commission;
             document.getElementById('val-badge-commission').textContent = `${{cfg.commission}} 元`;
@@ -5313,6 +5551,10 @@ def build_html_content(
             if (num) num.value = val;
             if (badge) {{
                 if (idPrefix === 'pullback') badge.textContent = `${{val}} (${{Math.round(val * 100)}}% K棒)`;
+                else if (idPrefix === 'margin-ratio') {{
+                    const reqPerLot = Math.round(35050 * (Number(val) / 100));
+                    badge.textContent = `${{val}}% (單口 ${{reqPerLot.toLocaleString('zh-TW')}} 元)`;
+                }}
                 else if (idPrefix === 'leverage') badge.textContent = `${{val}}x`;
                 else if (idPrefix === 'slippage') badge.textContent = `${{val}} 點`;
                 else badge.textContent = val;
@@ -5331,7 +5573,7 @@ def build_html_content(
 
             const fieldKeys = [
                 'bb-len', 'bb-mult', 'pullback',
-                'atr-len', 'atr-sig', 'leverage', 'slippage'
+                'atr-len', 'atr-sig', 'margin-ratio', 'leverage', 'slippage'
             ];
 
             fieldKeys.forEach(k => {{
@@ -5344,6 +5586,10 @@ def build_html_content(
                         num.value = range.value;
                         if (badge) {{
                             if (k === 'pullback') badge.textContent = `${{range.value}} (${{Math.round(range.value * 100)}}% K棒)`;
+                            else if (k === 'margin-ratio') {{
+                                const reqPerLot = Math.round(35050 * (Number(range.value) / 100));
+                                badge.textContent = `${{range.value}}% (單口 ${{reqPerLot.toLocaleString('zh-TW')}} 元)`;
+                            }}
                             else if (k === 'leverage') badge.textContent = `${{range.value}}x`;
                             else if (k === 'slippage') badge.textContent = `${{range.value}} 點`;
                             else badge.textContent = range.value;
@@ -5353,6 +5599,10 @@ def build_html_content(
                         range.value = num.value;
                         if (badge) {{
                             if (k === 'pullback') badge.textContent = `${{num.value}} (${{Math.round(num.value * 100)}}% K棒)`;
+                            else if (k === 'margin-ratio') {{
+                                const reqPerLot = Math.round(35050 * (Number(num.value) / 100));
+                                badge.textContent = `${{num.value}}% (單口 ${{reqPerLot.toLocaleString('zh-TW')}} 元)`;
+                            }}
                             else if (k === 'leverage') badge.textContent = `${{num.value}}x`;
                             else if (k === 'slippage') badge.textContent = `${{num.value}} 點`;
                             else badge.textContent = num.value;
@@ -5366,9 +5616,9 @@ def build_html_content(
                 selSizing.addEventListener('change', () => {{
                     const badgeSizing = document.getElementById('val-badge-sizing');
                     if (badgeSizing) {{
-                        badgeSizing.textContent = selSizing.value === 'margin'
-                            ? '滿倉模式 (3口)'
-                            : (selSizing.value === 'fixed_one_lot' ? '固定 1 口' : '預設槓桿風控');
+                        badgeSizing.textContent = selSizing.value === 'margin_ratio_130'
+                            ? '基準 A (維持率控管)'
+                            : (selSizing.value === 'fixed_one_lot' ? '固定 1 口' : '名目槓桿上限');
                     }}
                 }});
             }}
@@ -5392,6 +5642,8 @@ def build_html_content(
                     cfg.atr_length = Number(document.getElementById('num-atr-len').value);
                     cfg.atr_sig_length = Number(document.getElementById('num-atr-sig').value);
 
+                    const ratioPctEl = document.getElementById('num-margin-ratio');
+                    if (ratioPctEl) cfg.min_margin_ratio = Math.max(1.0, Number(ratioPctEl.value) / 100.0);
                     cfg.max_leverage = Number(document.getElementById('num-leverage').value);
                     cfg.commission = Number(document.getElementById('num-commission').value);
                     cfg.slippage = Number(document.getElementById('num-slippage').value);

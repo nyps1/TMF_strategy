@@ -65,12 +65,16 @@ class BacktestEngine:
 
     def _calculate_safe_qty(self, current_price: float) -> int:
         """
-        依據當前帳戶淨值、最大槓桿倍數與單口保證金，計算安全可下口數。
+        依據當前帳戶淨值、保證金維持率門檻 (基準 A: 130%) 與單口原始保證金，計算安全可下口數。
 
-        公式:
-            theoretical_max_qty = (equity * max_leverage) / (current_price * point_value)
-            margin_allowed_qty = equity / margin_req
-            safe_qty = floor(min(theoretical_max_qty, margin_allowed_qty))
+        規則說明:
+        1. 硬性開倉門檻: 當帳戶權益低於 1 口原始保證金 (35,050 元) 時，強制回傳 0 口 (禁止開倉)。
+        2. 基準 A (margin_ratio_130 / margin 模式):
+           required_per_lot = margin_req * min_margin_ratio (預設 35,050 * 1.30 = 45,565 元)
+           safe_qty = floor(equity / required_per_lot)
+           若 equity < required_per_lot，回傳 0 口；名目槓桿則隨盤勢點位與淨值動態浮動。
+        3. 名目價值上限模式 (notional 模式):
+           safe_qty = floor(min((equity * max_leverage) / (current_price * point_value), equity / margin_req))
 
         參數:
             current_price (float): 當前市場價格。
@@ -78,14 +82,16 @@ class BacktestEngine:
         返回:
             int: 允許下單之安全整數口數 (若資金不足則回傳 0)。
         """
-        if self.equity <= 0 or current_price <= 0:
+        if self.equity < self.config.margin_req or current_price <= 0:
             return 0
 
-        if self.config.position_sizing_mode == "margin":
-            raw_cap_qty = math.floor(self.equity / self.config.margin_req)
-            raw_lev_qty = math.floor((self.equity * self.config.max_leverage) / self.config.margin_req)
-            safe_qty = max(1, min(raw_cap_qty, raw_lev_qty))
-            return max(0, int(safe_qty))
+        if self.config.position_sizing_mode in ("margin_ratio_130", "margin"):
+            ratio = max(1.0, float(self.config.min_margin_ratio))
+            required_per_lot = self.config.margin_req * ratio
+            if self.equity < required_per_lot:
+                return 0
+            safe_qty = int(math.floor(self.equity / required_per_lot))
+            return max(0, safe_qty)
 
         max_contract_val = self.equity * self.config.max_leverage
         single_contract_val = current_price * self.config.point_value
@@ -130,6 +136,9 @@ class BacktestEngine:
         if pos.side == PositionSide.NONE or pos.qty <= 0:
             return
 
+        # 記錄進場時點之帳戶權益以計算動態真實槓桿與整戶維持率
+        equity_before = self.equity
+
         # 考慮滑價後的真實出場價
         slip = self.config.slippage_points if apply_slippage else 0.0
         if pos.side == PositionSide.LONG:
@@ -158,6 +167,12 @@ class BacktestEngine:
 
         cost_basis = pos.entry_price * self.config.point_value * pos.qty
         return_pct = (net_pnl / cost_basis) * 100.0 if cost_basis > 0 else 0.0
+        effective_leverage = (cost_basis / equity_before) if equity_before > 0 else 0.0
+        margin_ratio_pct = (
+            (equity_before / (pos.qty * self.config.margin_req)) * 100.0
+            if (pos.qty > 0 and self.config.margin_req > 0)
+            else 0.0
+        )
 
         trade = TradeRecord(
             trade_id=self.trade_counter,
@@ -174,7 +189,10 @@ class BacktestEngine:
             slippage_loss=round(slippage_loss, 2),
             net_pnl=round(net_pnl, 2),
             return_pct=round(return_pct, 4),
-            equity_after=round(self.equity, 2)
+            equity_after=round(self.equity, 2),
+            contract_value=round(cost_basis, 2),
+            effective_leverage=round(effective_leverage, 2),
+            margin_ratio_pct=round(margin_ratio_pct, 2)
         )
         self.trades.append(trade)
 

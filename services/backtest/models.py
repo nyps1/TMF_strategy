@@ -35,8 +35,13 @@ class BacktestConfig(BaseModel):
     initial_capital: float = Field(default=105150.0, description="期初總資金 (新台幣)")
     point_value: float = Field(default=10.0, description="每一跳動點數價值 (微台指=10元)")
     margin_req: float = Field(default=35050.0, description="單口所需原始保證金 (新台幣)")
-    max_leverage: float = Field(default=7.0, description="帳戶最高允許總槓桿倍數")
-    position_sizing_mode: str = Field(default="notional", description="部位計算模式: 'notional' (名目合約價值上限) 或 'margin' (保證金成數模式)")
+    maint_margin: float = Field(default=26900.0, description="單口所需維持保證金 (新台幣)")
+    min_margin_ratio: float = Field(default=1.30, description="最低整戶原始保證金維持率門檻 (基準A預設 1.30 即 130%，單口需 45,565 元)")
+    max_leverage: float = Field(default=7.0, description="帳戶最高允許總槓桿倍數 (僅 notional 模式使用)")
+    position_sizing_mode: str = Field(
+        default="notional",
+        description="部位計算模式: 'margin_ratio_130' (基準A: 130%原始保證金維持率+動態浮動槓桿)、'margin' 或 'notional'"
+    )
     
     # 布林通道設定 (真實成本版)
     bb_length: int = Field(default=30, description="布林通道 SMA 週期長度")
@@ -96,6 +101,9 @@ class TradeRecord(BaseModel):
     net_pnl: float = Field(..., description="淨損益 (扣除所有手續費、稅金與滑價)")
     return_pct: float = Field(..., description="單筆交易報酬率 (%)")
     equity_after: float = Field(..., description="交易完成後帳戶總權益淨值")
+    contract_value: float = Field(default=0.0, description="進場時點總合約名目價值 (entry_price * 10 * qty)")
+    effective_leverage: float = Field(default=0.0, description="進場時點動態真實名目槓桿倍數 (contract_value / equity_before)")
+    margin_ratio_pct: float = Field(default=0.0, description="進場時點整戶原始保證金維持率 (%)")
 
 
 class BacktestMetrics(BaseModel):
