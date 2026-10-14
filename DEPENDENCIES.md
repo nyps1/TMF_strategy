@@ -23,7 +23,7 @@
 | lightweight-charts | == 5.2.0 | 前端專業級 TradingView 高頻 K 線與 Baseline 走勢圖 Canvas 渲染引擎。 |
 
 ## 歷史回補功能之依賴說明
-歷史 Tick 回補（`backfill_history_tmf.py`、`services/tick_export/history_backfill.py`、`services/tick_export/monthly_excel.py`）**未新增任何外部套件**，僅重用上表既有依賴：
+歷史 Tick 回補（`backfill_history_tmf.py`、`services/tick_export/history_backfill.py`、`services/tick_export/monthly_excel.py`）與換月日曆（`services/tick_export/contract_calendar.py`，僅使用 Python 標準函式庫 `datetime`、`re`、`functools`）**未新增任何外部套件**，僅重用上表既有依賴：
 
 | Package Name | Version | Purpose（於回補功能中的用途） |
 |--------------|---------|---------|
