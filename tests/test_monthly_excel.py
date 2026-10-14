@@ -150,6 +150,20 @@ class TestHistoryScopeIsolation(unittest.TestCase):
         self.assertEqual(len(bars), 4)
         self.assertEqual(bars[0]["datetime"][:10], "2026-09-14")
 
+    def test_since_pins_the_window_start_inclusive(self) -> None:
+        """since 為含下界之時間窗起點，且可與 include_history 組合。"""
+        bars = KlineService(self.db_path, include_history=True, since="2026-09-14 09:01:00").get_kbars("1m")
+        self.assertEqual([b["datetime"] for b in bars][0], "2026-09-14 09:01:00")
+        self.assertEqual(len(bars), 3)
+
+        later = KlineService(self.db_path, include_history=True, since="2026-09-15").get_kbars("1m")
+        self.assertEqual({b["datetime"][:10] for b in later}, {"2026-09-16"})
+
+    def test_since_without_history_keeps_history_excluded(self) -> None:
+        """未納入歷史時，since 不得讓歷史列洩漏進來。"""
+        bars = KlineService(self.db_path, since="2026-09-01").get_kbars("1m")
+        self.assertEqual({b["datetime"][:10] for b in bars}, {"2026-09-16"})
+
 
 class TestDailySyncExcelPath(unittest.TestCase):
     """DailyDataSyncService.append_to_excel 之排程路徑回歸測試。"""

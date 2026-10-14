@@ -55,7 +55,12 @@ class KlineService:
         "1D": "1 日"
     }
 
-    def __init__(self, db_path: str = "data/market_data.db", include_history: bool = False) -> None:
+    def __init__(
+        self,
+        db_path: str = "data/market_data.db",
+        include_history: bool = False,
+        since: Optional[str] = None
+    ) -> None:
         """
         初始化 K 線服務。
 
@@ -64,9 +69,13 @@ class KlineService:
             include_history (bool): 是否納入歷史回補區段 (symbol == HISTORY_SYMBOL，Shioaji 近月連續合約)。
                 預設 False，僅載入每日增量同步之實體合約資料，使儀表板與回測範圍不因歷史回補而膨脹；
                 設為 True 則載入全部歷史 (資料量可達千萬筆秒 K，需預留足夠記憶體)。
+            since (Optional[str]): 時間下界 (含)，格式 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS。
+                僅載入此時間之後的秒 K；回補持續往 2024 年推進時，可用來固定儀表板與回測的時間窗。
+                預設 None 表示不設下界。
         """
         self.db_path = os.path.abspath(db_path)
         self.include_history = include_history
+        self.since = since
         self._cache_1m: Optional[pd.DataFrame] = None
         self._cache_intervals: Dict[str, List[Dict[str, Any]]] = {}
 
@@ -91,24 +100,25 @@ class KlineService:
             return self._cache_1m
 
         scope = "含歷史回補" if self.include_history else "不含歷史回補 (僅實體合約增量資料)"
+        if self.since:
+            scope += f"、自 {self.since} 起"
         logger.info(f"從 SQLite 資料庫載入秒 K 線 ({scope}): {self.db_path}...")
+
+        predicates: List[str] = []
+        params_list: List[Any] = []
+        if not self.include_history:
+            predicates.append("symbol <> ?")
+            params_list.append(HISTORY_SYMBOL)
+        if self.since:
+            predicates.append("time >= ?")
+            params_list.append(self.since)
+        where_clause = f"WHERE {' AND '.join(predicates)}" if predicates else ""
+        query = (
+            "SELECT time, open, high, low, close, volume FROM tmf10_second_bars "
+            f"{where_clause} ORDER BY time ASC;"
+        )
         with self._get_connection() as conn:
-            if self.include_history:
-                query = """
-                    SELECT time, open, high, low, close, volume
-                    FROM tmf10_second_bars
-                    ORDER BY time ASC;
-                """
-                params: tuple = ()
-            else:
-                query = """
-                    SELECT time, open, high, low, close, volume
-                    FROM tmf10_second_bars
-                    WHERE symbol <> ?
-                    ORDER BY time ASC;
-                """
-                params = (HISTORY_SYMBOL,)
-            df = pd.read_sql_query(query, conn, params=params)
+            df = pd.read_sql_query(query, conn, params=tuple(params_list))
 
         if df.empty:
             raise ValueError("Status: ERROR | Root Cause: tmf10_second_bars 資料表為空 | Suggested Fix: 確認資料庫寫入成功。")

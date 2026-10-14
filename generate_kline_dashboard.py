@@ -6162,22 +6162,28 @@ def build_html_content(
     return html
 
 
+DASHBOARD_HISTORY_START: str = "2026-07-22"  # 儀表板與回測之固定時間窗起點 (回補持續往前推進時維持不變)
+
+
 def generate_dashboard(
     db_path: str = "data/market_data.db",
-    output_html_path: str = "kline_dashboard.html"
+    output_html_path: str = "kline_dashboard.html",
+    since: str = DASHBOARD_HISTORY_START
 ) -> str:
     """
     執行多週期聚合、三大策略回測運算並產生支援直觀對比之 HTML 儀表板檔案。
+    資料範圍含歷史回補區段，自 since 起至資料庫最新一筆。
 
     參數:
         db_path (str): SQLite 資料庫路徑。
         output_html_path (str): 目標 HTML 輸出路徑。
+        since (str): 資料時間下界 (含)，預設 DASHBOARD_HISTORY_START。
 
     返回:
         str: 產出之 HTML 絕對路徑。
     """
-    logger.info(f"開始從 SQLite 資料庫聚合全時序 K 線: {db_path}...")
-    service = KlineService(db_path=db_path)
+    logger.info(f"開始從 SQLite 資料庫聚合全時序 K 線 (含歷史回補，自 {since} 起): {db_path}...")
+    service = KlineService(db_path=db_path, include_history=True, since=since)
 
     # 聚合 11 種指定週期
     intervals = ["1m", "2m", "3m", "5m", "15m", "30m", "45m", "1h", "2h", "4h", "1d"]
