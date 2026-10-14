@@ -151,5 +151,47 @@ class TestHistoryScopeIsolation(unittest.TestCase):
         self.assertEqual(bars[0]["datetime"][:10], "2026-09-14")
 
 
+class TestDailySyncExcelPath(unittest.TestCase):
+    """DailyDataSyncService.append_to_excel 之排程路徑回歸測試。"""
+
+    def setUp(self) -> None:
+        """建立隔離之暫存路徑與服務實體。"""
+        from services.tick_export import DailyDataSyncService
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.tmp.name, "m.db")
+        self.xlsx = os.path.join(self.tmp.name, "daily.xlsx")
+        self.svc = DailyDataSyncService(
+            db_path=self.db_path, excel_path=self.xlsx,
+            parquet_path=os.path.join(self.tmp.name, "p.parquet"),
+            cache_dir=os.path.join(self.tmp.name, "cache"),
+        )
+
+    def tearDown(self) -> None:
+        """清除暫存目錄。"""
+        self.tmp.cleanup()
+
+    def test_append_to_excel_rebuilds_month_sheets_from_sqlite(self) -> None:
+        """排程流程 (SQLite 先寫入 → append_to_excel) 產出一月一工作表，回傳新增列數。"""
+        history = _bars(["2026-09-14 09:00:00", "2026-09-14 09:00:01"])
+        new_rows = _bars(["2026-10-14 04:59:57", "2026-10-14 04:59:58"], base=200.0)
+        SQLiteManager(self.db_path).insert_second_bars(history, symbol=HISTORY_SYMBOL)
+        self.svc.append_to_sqlite(new_rows, symbol="TMFJ6")
+
+        appended = self.svc.append_to_excel(new_rows)
+        self.assertEqual(appended, 2)
+
+        wb = openpyxl.load_workbook(self.xlsx, read_only=True)
+        try:
+            self.assertEqual(wb.sheetnames, ["26-09", "26-10"])
+            self.assertEqual(len(list(wb["26-10"].iter_rows(values_only=True))) - 1, 2)
+        finally:
+            wb.close()
+
+    def test_append_to_excel_noop_when_no_new_rows(self) -> None:
+        """無新增資料時不得觸碰 Excel 檔案。"""
+        self.assertEqual(self.svc.append_to_excel(_bars([])), 0)
+        self.assertFalse(os.path.exists(self.xlsx))
+
+
 if __name__ == "__main__":
     unittest.main()
