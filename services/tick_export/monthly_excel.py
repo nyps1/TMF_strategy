@@ -1,12 +1,16 @@
 """
-微台10 秒 K 線「依月份分頁」Excel 匯出服務 (services/tick_export/monthly_excel.py)
+微台10 秒 K 線「依合約月份分頁」Excel 匯出服務 (services/tick_export/monthly_excel.py)
 
 職責：
 1. 以 SQLite (data/market_data.db) 為唯一資料來源 (Single Source of Truth)，
-   依「時間」欄位之日曆月份切分，每個月份對應一個工作表 (例如 2026-09 → 工作表「26-09」)。
+   依「合約月份」切分，每個合約月份對應一個工作表 (例如 2026 年 10 月合約 → 工作表「26-10」)。
+   歸月規則：
+   - 實體合約代碼 (如 TMFJ6) 直接由代碼解出合約月份。
+   - 連續合約 (如歷史回補之 TMFR1) 依換月日曆 (第三個星期三 15:00 換月) 由時間戳推算。
+   因此工作表邊界即為到期日換月點，不會在同一分頁混入兩個合約。
 2. 使用 xlsxwriter constant_memory 串流寫入，記憶體用量與總筆數無關 (僅取決於 chunk_size)。
 3. 先寫入暫存檔，成功後以 os.replace 原子替換正本，避免寫入中斷造成正本損毀。
-4. 單月筆數若超過 Excel 單表上限 (1,048,576 列)，自動以「26-09 (2)」接續分頁。
+4. 單一合約筆數若超過 Excel 單表上限 (1,048,576 列)，自動以「26-09 (2)」接續分頁。
 
 設計取捨：xlsx 為 zip 封裝之 XML，無法在不重寫整個封裝的情況下追加列；
 本服務採「由 SQLite 全量重建」的冪等策略，換取結構一致與零累積誤差。
@@ -19,10 +23,11 @@ import shutil
 import sqlite3
 import time
 import logging
-from datetime import datetime
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import xlsxwriter
+
+from services.tick_export import contract_calendar as cal
 
 logger = logging.getLogger(__name__)
 
@@ -78,55 +83,108 @@ class MonthlyExcelExporter:
         return base if part <= 1 else f"{base} ({part})"
 
     @staticmethod
-    def _month_bounds(month_key: str) -> Tuple[str, str]:
+    def _scan_symbols(conn: sqlite3.Connection) -> Tuple[List[str], Dict[str, Tuple[int, int]]]:
         """
-        計算月份之左閉右開時間區間字串。
+        掃描資料庫內所有 symbol，並區分兩種歸月方式。
+
+        - 實體合約代碼 (如 TMFJ6)：可由代碼直接解出合約年月，歸月不依賴時間。
+        - 其他代碼 (如連續合約 TMFR1)：代碼不含月份，改依換月日曆以時間戳推算合約月份。
 
         參數:
-            month_key (str): 月份鍵，格式 YYYY-MM。
+            conn (sqlite3.Connection): 已開啟之 SQLite 連線。
 
         返回:
-            Tuple[str, str]: (月初 00:00:00, 次月初 00:00:00)，格式 YYYY-MM-DD HH:MM:SS。
+            Tuple[List[str], Dict[str, Tuple[int, int]]]:
+                (以時間歸月之 symbol 清單, {實體合約代碼: (合約年, 合約月)})。
+        """
+        time_ruled: List[str] = []
+        physical: Dict[str, Tuple[int, int]] = {}
+        for (symbol,) in conn.execute("SELECT DISTINCT symbol FROM tmf10_second_bars;").fetchall():
+            parsed = cal.parse_contract_code(symbol)
+            if parsed:
+                physical[symbol] = parsed
+            else:
+                time_ruled.append(symbol)
+        return sorted(time_ruled), physical
+
+    @staticmethod
+    def _contract_filter(
+        month_key: str,
+        time_ruled: List[str],
+        physical: Dict[str, Tuple[int, int]]
+    ) -> Tuple[str, List[Any]]:
+        """
+        產生某合約月份對應之 SQL WHERE 條件與參數。
+
+        參數:
+            month_key (str): 合約月份鍵，格式 YYYY-MM。
+            time_ruled (List[str]): 以時間歸月之 symbol 清單。
+            physical (Dict[str, Tuple[int, int]]): 實體合約代碼對應之 (年, 月)。
+
+        返回:
+            Tuple[str, List[Any]]: (括號包覆之條件字串, 參數清單)；無任何來源時為 ("0", [])。
         """
         year, month = (int(x) for x in month_key.split("-"))
-        start = datetime(year, month, 1)
-        end = datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
-        return start.strftime("%Y-%m-%d %H:%M:%S"), end.strftime("%Y-%m-%d %H:%M:%S")
+        clauses: List[str] = []
+        params: List[Any] = []
+        if time_ruled:
+            lower, upper = cal.contract_time_bounds(year, month)
+            placeholders = ",".join("?" for _ in time_ruled)
+            clauses.append(f"(symbol IN ({placeholders}) AND time >= ? AND time < ?)")
+            params.extend([*time_ruled, lower, upper])
+        own_symbols = [code for code, ym in physical.items() if ym == (year, month)]
+        if own_symbols:
+            placeholders = ",".join("?" for _ in own_symbols)
+            clauses.append(f"symbol IN ({placeholders})")
+            params.extend(own_symbols)
+        if not clauses:
+            return "0", []
+        return "(" + " OR ".join(clauses) + ")", params
 
     def list_months(self) -> List[Dict[str, Any]]:
         """
-        掃描 SQLite 並列出所有含資料之月份及其統計。
+        掃描 SQLite 並列出所有含資料之「合約月份」及其統計。
 
         返回:
-            List[Dict[str, Any]]: 依月份升冪排列，元素包含 month_key、rows、first_time、last_time。
+            List[Dict[str, Any]]: 依合約月份升冪排列，元素包含 month_key、contract (商品代碼)、
+                rows、first_time、last_time，以及供串流讀取使用之 sql_filter / sql_params。
         """
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         try:
-            cur = conn.cursor()
-            row = cur.execute("SELECT MIN(time), MAX(time) FROM tmf10_second_bars;").fetchone()
-            if not row or not row[0]:
-                return []
-            first_dt = datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S")
-            last_dt = datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S")
+            time_ruled, physical = self._scan_symbols(conn)
+
+            keys = {cal.contract_key(y, m) for (y, m) in physical.values()}
+            if time_ruled:
+                placeholders = ",".join("?" for _ in time_ruled)
+                row = conn.execute(
+                    f"SELECT MIN(time), MAX(time) FROM tmf10_second_bars WHERE symbol IN ({placeholders});",
+                    time_ruled
+                ).fetchone()
+                if row and row[0]:
+                    year, month = cal.contract_month_for(row[0])
+                    last = cal.contract_month_for(row[1])
+                    while (year, month) <= last:
+                        keys.add(cal.contract_key(year, month))
+                        year, month = cal.next_month(year, month)
 
             months: List[Dict[str, Any]] = []
-            year, month = first_dt.year, first_dt.month
-            while (year, month) <= (last_dt.year, last_dt.month):
-                key = f"{year:04d}-{month:02d}"
-                lo, hi = self._month_bounds(key)
-                stats = cur.execute(
-                    "SELECT COUNT(*), MIN(time), MAX(time) FROM tmf10_second_bars "
-                    "WHERE time >= ? AND time < ?;",
-                    (lo, hi)
+            for key in sorted(keys):
+                where, params = self._contract_filter(key, time_ruled, physical)
+                stats = conn.execute(
+                    f"SELECT COUNT(*), MIN(time), MAX(time) FROM tmf10_second_bars WHERE {where};",
+                    params
                 ).fetchone()
                 if stats and stats[0]:
+                    year, month = (int(x) for x in key.split("-"))
                     months.append({
                         "month_key": key,
+                        "contract": cal.contract_code_for_month(year, month),
                         "rows": int(stats[0]),
                         "first_time": stats[1],
-                        "last_time": stats[2]
+                        "last_time": stats[2],
+                        "sql_filter": where,
+                        "sql_params": params,
                     })
-                year, month = (year + 1, 1) if month == 12 else (year, month + 1)
             return months
         finally:
             conn.close()
@@ -134,24 +192,23 @@ class MonthlyExcelExporter:
     def _iter_month_chunks(
         self,
         conn: sqlite3.Connection,
-        month_key: str
+        month: Dict[str, Any]
     ) -> Iterator[List[Tuple[Any, ...]]]:
         """
-        以固定大小區塊串流讀取指定月份之秒 K 列 (依時間升冪)。
+        以固定大小區塊串流讀取指定合約月份之秒 K 列 (依時間升冪)。
 
         參數:
             conn (sqlite3.Connection): 已開啟之 SQLite 連線。
-            month_key (str): 月份鍵，格式 YYYY-MM。
+            month (Dict[str, Any]): list_months() 回傳之單一合約月份描述 (含 sql_filter / sql_params)。
 
         產出:
             List[Tuple[Any, ...]]: 每塊最多 chunk_size 列，欄位順序同 EXCEL_HEADERS。
         """
-        lo, hi = self._month_bounds(month_key)
         cur = conn.cursor()
         cur.execute(
             "SELECT time, open, high, low, close, volume FROM tmf10_second_bars "
-            "WHERE time >= ? AND time < ? ORDER BY time ASC;",
-            (lo, hi)
+            f"WHERE {month['sql_filter']} ORDER BY time ASC;",
+            month["sql_params"]
         )
         while True:
             chunk = cur.fetchmany(self.chunk_size)
@@ -262,11 +319,12 @@ class MonthlyExcelExporter:
                     return sheet
 
                 ws = _open_sheet(part)
-                for chunk in self._iter_month_chunks(conn, m["month_key"]):
+                for chunk in self._iter_month_chunks(conn, m):
                     for t, o, h, l, c, v in chunk:
                         if row_idx >= self.max_rows_per_sheet:
                             sheet_reports.append({
                                 "sheet": self.month_sheet_name(m["month_key"], part),
+                                "contract": m["contract"],
                                 "rows": sheet_rows, "first_time": sheet_first, "last_time": sheet_last
                             })
                             part += 1
@@ -288,12 +346,13 @@ class MonthlyExcelExporter:
                     total_rows += 0  # 於分頁收尾時統一累加
                 sheet_reports.append({
                     "sheet": self.month_sheet_name(m["month_key"], part),
+                    "contract": m["contract"],
                     "rows": sheet_rows, "first_time": sheet_first, "last_time": sheet_last
                 })
                 last_sheet = ws
                 logger.info(
-                    f"月份 {m['month_key']} 已寫入工作表「{self.month_sheet_name(m['month_key'], part)}」"
-                    f"(本月共 {m['rows']:,} 列，累計 {sum(r['rows'] for r in sheet_reports):,} 列)"
+                    f"合約 {m['contract']} ({m['month_key']}) 已寫入工作表「{self.month_sheet_name(m['month_key'], part)}」"
+                    f"(本合約共 {m['rows']:,} 列，累計 {sum(r['rows'] for r in sheet_reports):,} 列)"
                 )
         except Exception:
             conn.close()

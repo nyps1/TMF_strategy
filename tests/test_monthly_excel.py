@@ -1,12 +1,12 @@
 """
-月份分頁 Excel 匯出與歷史範圍隔離單元測試 (tests/test_monthly_excel.py)
+合約月份分頁 Excel 匯出與歷史範圍隔離單元測試 (tests/test_monthly_excel.py)
 
 驗證：
 1. 工作表命名（26-09、溢位 26-09 (2)）。
-2. 依日曆月份切分、列數與起訖時間正確、標題列完整。
-3. 單月超過列數上限時自動溢位分頁且不遺漏資料。
+2. 依合約月份切分（連續合約依換月日曆、實體合約依代碼）、列數與起訖時間正確、標題列完整。
+3. 單一合約超過列數上限時自動溢位分頁且不遺漏資料。
 4. 舊版單一工作表活頁簿於改版前被備份為 .legacy.bak。
-5. KlineService 預設排除歷史回補區段，include_history=True 才納入。
+5. KlineService 預設排除歷史回補區段，include_history=True 才納入，since 可固定時間窗起點。
 """
 
 import os
@@ -37,16 +37,22 @@ class TestMonthlyExcel(unittest.TestCase):
     """MonthlyExcelExporter 行為測試。"""
 
     def setUp(self) -> None:
-        """建立含跨月資料之暫存資料庫。"""
+        """
+        建立橫跨換月點之暫存資料庫：
+        - TMFR1 (連續合約，依時間歸月)：2026-08-19 13:29:58 為 8 月合約最後一秒，15:00:00 起為 9 月合約。
+        - TMFJ6 (實體 10 月合約，依代碼歸月)：自 2026-09-15 15:00:00 起，早於規則換月點 (09-16 15:00)，
+          必須仍歸入 10 月工作表，而非依時間誤歸 9 月。
+        """
         self.tmp = tempfile.TemporaryDirectory()
         self.db_path = os.path.join(self.tmp.name, "m.db")
         self.xlsx = os.path.join(self.tmp.name, "out.xlsx")
         mgr = SQLiteManager(self.db_path)
         mgr.insert_second_bars(_bars([
-            "2026-08-31 15:00:00", "2026-08-31 15:00:01",
+            "2026-08-19 13:29:58",
+            "2026-08-19 15:00:00", "2026-08-31 15:00:00", "2026-08-31 15:00:01",
         ]), symbol=HISTORY_SYMBOL)
         mgr.insert_second_bars(_bars([
-            "2026-09-01 09:00:00", "2026-09-30 23:59:59",
+            "2026-09-15 15:00:00", "2026-09-30 23:59:59",
             "2026-10-01 00:00:00", "2026-10-02 09:00:00", "2026-10-02 09:00:01",
         ]), symbol="TMFJ6")
 
@@ -60,32 +66,45 @@ class TestMonthlyExcel(unittest.TestCase):
         self.assertEqual(MonthlyExcelExporter.month_sheet_name("2026-09", 2), "26-09 (2)")
         self.assertEqual(MonthlyExcelExporter.month_sheet_name("2025-01"), "25-01")
 
-    def test_export_splits_by_calendar_month(self) -> None:
-        """依日曆月份切分：08 月 2 列、09 月 2 列、10 月 3 列，月邊界 23:59:59 / 00:00:00 不重不漏。"""
+    def test_export_splits_by_contract_month(self) -> None:
+        """依合約月份切分：8 月合約 1 列、9 月合約 3 列、10 月合約 5 列，換月邊界不重不漏。"""
         summary = MonthlyExcelExporter(self.db_path, self.xlsx).export()
-        self.assertEqual(summary["total_rows"], 7)
+        self.assertEqual(summary["total_rows"], 9)
+        self.assertEqual([s["contract"] for s in summary["sheets"]], ["TMFH6", "TMFI6", "TMFJ6"])
 
         wb = openpyxl.load_workbook(self.xlsx, read_only=True)
         try:
             self.assertEqual(wb.sheetnames, ["26-08", "26-09", "26-10"])
-            expected = {"26-08": 2, "26-09": 2, "26-10": 3}
+            expected = {"26-08": 1, "26-09": 3, "26-10": 5}
             for name, n_rows in expected.items():
                 rows = list(wb[name].iter_rows(values_only=True))
                 self.assertEqual(list(rows[0]), EXCEL_HEADERS)
                 self.assertEqual(len(rows) - 1, n_rows, name)
+
+            aug_rows = list(wb["26-08"].iter_rows(values_only=True))
+            self.assertEqual(aug_rows[1][0], "2026-08-19 13:29:58")  # 到期日最後一秒屬 8 月合約
             sep_rows = list(wb["26-09"].iter_rows(values_only=True))
-            self.assertEqual(sep_rows[1][0], "2026-09-01 09:00:00")
-            self.assertEqual(sep_rows[2][0], "2026-09-30 23:59:59")
+            self.assertEqual(sep_rows[1][0], "2026-08-19 15:00:00")  # 到期日 15:00 夜盤起屬 9 月合約
+            oct_rows = list(wb["26-10"].iter_rows(values_only=True))
+            self.assertEqual(oct_rows[1][0], "2026-09-15 15:00:00")  # 實體 TMFJ6 以代碼歸入 10 月
+            self.assertEqual(oct_rows[2][0], "2026-09-30 23:59:59")
         finally:
             wb.close()
 
+    def test_sheet_rows_are_chronological(self) -> None:
+        """每個工作表內之時間嚴格遞增，且各合約時間區間不交疊。"""
+        summary = MonthlyExcelExporter(self.db_path, self.xlsx).export()
+        ranges = [(s["first_time"], s["last_time"]) for s in summary["sheets"]]
+        for (_, prev_last), (next_first, _) in zip(ranges, ranges[1:]):
+            self.assertLess(prev_last, next_first)
+
     def test_overflow_creates_continuation_sheet(self) -> None:
-        """單月資料超過 max_rows_per_sheet 時，自動以「26-10 (2)」接續且總列數不變。"""
+        """單一合約資料超過 max_rows_per_sheet 時，以「26-10 (2)」等接續且總列數不變。"""
         summary = MonthlyExcelExporter(self.db_path, self.xlsx, max_rows_per_sheet=2).export()
         names = [s["sheet"] for s in summary["sheets"]]
-        self.assertEqual(names, ["26-08", "26-09", "26-10", "26-10 (2)"])
-        self.assertEqual(summary["total_rows"], 7)
-        self.assertEqual(sum(s["rows"] for s in summary["sheets"]), 7)
+        self.assertEqual(names, ["26-08", "26-09", "26-09 (2)", "26-10", "26-10 (2)", "26-10 (3)"])
+        self.assertEqual(summary["total_rows"], 9)
+        self.assertEqual(sum(s["rows"] for s in summary["sheets"]), 9)
 
     def test_export_is_idempotent(self) -> None:
         """重複匯出結果一致（冪等）。"""
