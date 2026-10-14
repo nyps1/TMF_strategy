@@ -20,6 +20,7 @@ from datetime import datetime, date
 import pandas as pd
 
 from services.storage import SQLiteManager
+from services.tick_export import contract_calendar as cal
 from services.tick_export.exporter import TickExporter
 from services.tick_export.models import ExportConfig
 from services.tick_export.monthly_excel import MonthlyExcelExporter
@@ -31,7 +32,13 @@ class DailyDataSyncService:
     """
     微台10期貨每日高頻時序數據增量同步服務引擎。
     結合 Facade Pattern 與 Pipeline Pattern，確保跨儲存體的一致性與冪等性。
+
+    合約處理：一律向 Shioaji 請求近月連續合約 TMFR1，由交易所規則自動換月，
+    不再寫死單一月份合約；寫入 SQLite 時依換月日曆為每一列標記實際所屬之實體合約代碼 (如 TMFJ6)，
+    使「實體合約」語意與月份分頁 Excel 的歸月規則保持一致。
     """
+
+    NEAR_MONTH_SYMBOL: str = "TMFR1"  # Shioaji 近月連續合約，到期日 15:00 自動換為次月合約
 
     def __init__(
         self,
@@ -57,7 +64,7 @@ class DailyDataSyncService:
         self.sqlite_manager = SQLiteManager(db_path=self.db_path)
         self.tick_exporter = TickExporter(
             config=ExportConfig(
-                symbol="TMFJ6",
+                symbol=self.NEAR_MONTH_SYMBOL,
                 cache_dir=self.cache_dir,
                 only_active_seconds=True
             )
@@ -203,13 +210,14 @@ class DailyDataSyncService:
         logger.info(f"Parquet 快取資產原子化更新完畢，目前總筆數: {len(combined_df):,} 筆。")
         return len(combined_df)
 
-    def append_to_sqlite(self, df_new: pd.DataFrame, symbol: str = "TMFJ6") -> int:
+    def append_to_sqlite(self, df_new: pd.DataFrame, symbol: Optional[str] = None) -> int:
         """
         呼叫 SQLiteManager 將增量秒 K 線批次寫入 SQLite 資料庫。
 
         參數:
             df_new (pd.DataFrame): 欲寫入之秒 K 線 DataFrame。
-            symbol (str): 商品合約代碼。
+            symbol (Optional[str]): 商品合約代碼。若為 None (預設)，依換月日曆為每一列判定實際所屬之
+                實體合約 (如 TMFJ6)，跨越到期日換月點之批次會自動拆成多個合約分別寫入。
 
         返回:
             int: 成功寫入之資料筆數。
@@ -218,13 +226,63 @@ class DailyDataSyncService:
             logger.info("無新增數據，略過 SQLite 寫入作業。")
             return 0
 
-        inserted_count = self.sqlite_manager.insert_second_bars(
-            df=df_new,
-            symbol=symbol,
-            batch_size=50000
-        )
+        if symbol is not None:
+            groups = [(symbol, df_new)]
+        else:
+            codes = df_new["時間"].map(cal.contract_code_for)
+            groups = [(code, part) for code, part in df_new.groupby(codes, sort=True)]
+
+        inserted_count = 0
+        for code, part in groups:
+            written = self.sqlite_manager.insert_second_bars(
+                df=part,
+                symbol=code,
+                batch_size=50000
+            )
+            logger.info(f"合約 {code} 寫入 {written:,} 筆 ({part['時間'].min()} ~ {part['時間'].max()})。")
+            inserted_count += written
         logger.info(f"SQLite 增量寫入完成，共計寫入 {inserted_count:,} 筆秒 K 線記錄。")
         return inserted_count
+
+    def resolve_near_month_contract(self, api: Any) -> Any:
+        """
+        取得 Shioaji 近月連續合約 (TMFR1) 物件，取代寫死單一月份合約。
+
+        優先自已下載之合約清單取得；清單內缺少時 (例如輕量登入) 手動建構等價之 Future 物件。
+
+        參數:
+            api: 已登入之 Shioaji API 實例。
+
+        返回:
+            Any: TMFR1 合約物件。
+
+        例外:
+            ValueError: 無法取得或建構合約物件時，附 Status + Root Cause + Suggested Fix 說明。
+        """
+        try:
+            contract = api.Contracts.Futures.TMF.get(self.NEAR_MONTH_SYMBOL)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"自合約清單查詢 {self.NEAR_MONTH_SYMBOL} 失敗 ({e})，改為手動建構。")
+            contract = None
+
+        if contract:
+            return contract
+
+        try:
+            import shioaji as sj
+            from shioaji.contracts import Future
+            return Future(
+                code=self.NEAR_MONTH_SYMBOL, symbol=self.NEAR_MONTH_SYMBOL,
+                name="微型臺指期貨近月", category="TMF",
+                exchange=sj.constant.Exchange.TAIFEX
+            )
+        except Exception as e:  # noqa: BLE001
+            err_msg = (
+                f"Status: ERROR | Root Cause: 無法取得或建構近月連續合約 {self.NEAR_MONTH_SYMBOL} ({e}) | "
+                f"Suggested Fix: 確認 shioaji 版本 (== 1.3.1) 並重新登入以下載合約清單。"
+            )
+            logger.error(err_msg)
+            raise ValueError(err_msg) from e
 
     @staticmethod
     def get_taifex_trading_date(dt: Optional[datetime] = None) -> str:
@@ -286,24 +344,8 @@ class DailyDataSyncService:
         logger.info(f"開始執行微台10每日數據增量同步任務 (目標交易日: {sync_date})")
         logger.info("=" * 60)
 
-        # 1. 取得合約資訊
-        target_code = "TMFJ6"
-        contract = api.Contracts.Futures.TMF.get(target_code)
-        if not contract:
-            # 搜尋當月合約
-            for c in api.Contracts.Futures.TMF:
-                if c.symbol.startswith("TMF202610") or c.name == "微台10":
-                    contract = c
-                    break
-
-        if not contract:
-            err_msg = (
-                f"Status: ERROR | Root Cause: 未在 Shioaji 期貨合約清單中找到微台10 ({target_code}) | "
-                f"Suggested Fix: 確認商品代碼或檢查合約是否已到期換月。"
-            )
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-
+        # 1. 取得近月連續合約 (TMFR1)：由交易所規則自動換月，不再寫死單一月份合約
+        contract = self.resolve_near_month_contract(api)
         contract_code = contract.code
 
         # 2. 檢索當前已收錄最新時間戳
@@ -359,8 +401,9 @@ class DailyDataSyncService:
         new_max_time = df_new["時間"].max()
         logger.info(f"即將同步新增數據: 區間 [{new_min_time} 至 {new_max_time}]，共 {delta_count:,} 筆。")
 
-        # 4. 追加寫入 SQLite 資料庫
-        sqlite_inserted = self.append_to_sqlite(df_new=df_new, symbol=contract_code)
+        # 4. 追加寫入 SQLite 資料庫（symbol 交由換月日曆逐列標記為實際所屬之實體合約）
+        physical_contracts = sorted(df_new["時間"].map(cal.contract_code_for).unique().tolist())
+        sqlite_inserted = self.append_to_sqlite(df_new=df_new)
 
         # 5. 原子化更新本機 Parquet 快取
         parquet_total = self.append_to_parquet(df_new=df_new)
@@ -377,6 +420,7 @@ class DailyDataSyncService:
             "status": "SUCCESS",
             "date": sync_date,
             "contract": contract_code,
+            "physical_contracts": physical_contracts,
             "new_bars_count": delta_count,
             "new_range_start": new_min_time,
             "new_range_end": new_max_time,
