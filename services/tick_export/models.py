@@ -26,7 +26,7 @@ class ExportConfig(BaseModel):
     """
     秒 K 線匯出組態設定模型。
     """
-    symbol: str = Field(default="TMFJ6", description="合約代碼 (TMFJ6 對應微台10 / TMF202610)")
+    symbol: str = Field(default="TMFR1", description="合約代碼 (TMFR1 為近月連續合約，到期日 15:00 自動換月)")
     start_date: str = Field(default="2026-09-16", description="上架起始日期 (YYYY-MM-DD)")
     end_date: str = Field(default="2026-10-12", description="匯出截止日期 (YYYY-MM-DD)")
     output_excel: str = Field(default="微台10_每秒逐筆歷史紀錄.xlsx", description="目標 Excel 輸出檔名")
