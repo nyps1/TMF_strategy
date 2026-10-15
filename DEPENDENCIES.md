@@ -62,6 +62,17 @@
 | numpy        | == 1.26.4 | 向量化布林通道與 ATR 指標運算，支撐基準 A 動態口數回測。 |
 | lightweight-charts | == 5.2.0 | 配合 `ResizeObserver` 與 CSS Media Queries 支援平板（`1024px`）與手機（`768px`）RWD 自適應圖表縮放。 |
 
+## Telegram Bot 即時推播與自訂回測區間模組之依賴說明
+Telegram Bot 雙向互動與持久化佇列推播服務（`services/notification/telegram_bot.py`）、即時價格策略訊號監控服務（`services/live/live_signal_monitor.py`）以及前端自訂回測區間與初始資金控制模組（`generate_kline_dashboard.py`）僅重用既有核心依賴，**未新增任何外部第三方套件**：
+
+| Package Name | Version | Purpose（於 Telegram Bot 與即時訊號模組中的用途） |
+|--------------|---------|---------|
+| httpx        | == 0.28.1 | 呼叫 Telegram Bot API（`getMe`、`getUpdates`、`sendMessage`）執行訊息推播與指令輪詢。 |
+| fastapi      | == 0.110.0 | 提供 `/ws/market`、`/ws/live`、`/api/telegram/status`、`/api/telegram/notify-update` 路由與背景監控協程。 |
+| uvicorn      | == 0.29.0 | 驅動本機 `127.0.0.1:8000` 常駐伺服器，使本地端 `kline_dashboard.html` WebSocket 即時連線並維持 Telegram Bot 輪詢。 |
+| python-dotenv| == 1.0.1 | 自動載入 `.env` 內之 `TELEGRAM_BOT_TOKEN` 與 `SHIOAJI_API_KEY`。 |
+| pandas       | == 2.2.1 | 即時計算最新 5 分 K 布林通道上下軌、ATR 指標與策略暖機時序。 |
+
 ## 安裝指令
 
 請於 Python 環境中執行以下指令以安裝依賴：
@@ -75,4 +86,5 @@ pip install -r requirements.txt
 ```bash
 cd frontend && npm install lightweight-charts
 ```
+
 

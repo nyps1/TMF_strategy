@@ -48,7 +48,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--start", default=DEFAULT_START_DATE, help="回補起日 YYYY-MM-DD (預設: 微台上市日 2024-07-29)")
     parser.add_argument("--end", default=None, help="回補迄日 YYYY-MM-DD (預設: 既有實體合約資料最早日)")
     parser.add_argument("--max-days", type=int, default=None, help="本次最多下載之交易日數 (試跑用)")
-    parser.add_argument("--reserve-mb", type=float, default=90.0, help="保留給每日增量同步之流量額度 MB (預設 90)")
+    parser.add_argument("--reserve-mb", type=float, default=40.0, help="保留給每日增量同步之流量額度 MB (預設 40)")
     parser.add_argument("--retry-empty", action="store_true", help="重試先前判定為無資料之日期")
     parser.add_argument("--no-excel", action="store_true", help="回補後不重建 Excel")
     parser.add_argument("--excel-only", action="store_true", help="不連線 Shioaji，僅由 SQLite 重建 Excel")
@@ -185,6 +185,20 @@ def main() -> None:
         except (PermissionError, ValueError) as e:
             print(str(e))
             sys.exit(1)
+
+    if not args.excel_only:
+        try:
+            from services.notification.telegram_bot import TelegramBotService
+            TelegramBotService(db_path=DB_PATH).notify_update_success(
+                report={
+                    "stop_reason": report.get("stop_reason"),
+                    "inserted_rows": inserted,
+                    "remaining_mb": report.get("quota_remaining_mb", 0.0),
+                    "reserve_mb": args.reserve_mb,
+                }
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Telegram 推播通知略過: {e}")
 
 
 if __name__ == "__main__":

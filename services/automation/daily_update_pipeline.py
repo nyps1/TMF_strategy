@@ -168,6 +168,27 @@ class DailyUpdatePipeline:
             logger.warning(f"GitHub Pages 自動發布遭遇非致命異常 ({e})，保留本機 HTML 產出。")
             return {"step": "pages_deploy", "status": "DEGRADED", "error": str(e)}
 
+    def run_telegram_notify_step(self, report: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        步驟五：透過 TelegramBotService 推播定時更新成功資訊至 @TMFR1_bot。
+
+        參數:
+            report (Dict[str, Any]): 當前管線執行成果摘要字典。
+
+        返回:
+            Dict[str, Any]: Telegram 推播執行狀態摘要。
+        """
+        logger.info("【管線步驟 5/5】開始推播更新成功資訊至 Telegram Bot (@TMFR1_bot)...")
+        try:
+            from services.notification.telegram_bot import TelegramBotService
+            bot = TelegramBotService(db_path=self.db_path)
+            res = bot.notify_update_success(report=report)
+            logger.info(f"Telegram 推播完成: status={res.get('status')}")
+            return {"step": "telegram_notify", **res}
+        except Exception as e:
+            logger.warning(f"Telegram 推播遭遇非致命異常 ({e})。")
+            return {"step": "telegram_notify", "status": "DEGRADED", "error": str(e)}
+
     def execute_pipeline(self) -> Dict[str, Any]:
         """
         執行整套每日定時更新流水線。
@@ -196,6 +217,8 @@ class DailyUpdatePipeline:
             "html_step": html_res,
             "pages_step": pages_res
         }
+        tg_res = self.run_telegram_notify_step(report)
+        report["telegram_step"] = tg_res
 
         logger.info(
             f"=== 微台10 定時資料更新管線完成 [{report['pipeline_status']}] (總耗時: {total_elapsed:.2f}s) ==="

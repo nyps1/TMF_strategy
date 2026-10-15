@@ -110,7 +110,7 @@ class HistoricalBackfillService:
         db_path: str = "data/market_data.db",
         cache_dir: str = "data/ticks_cache",
         state_path: str = "data/backfill_state.json",
-        reserve_mb: float = 90.0
+        reserve_mb: float = 40.0
     ) -> None:
         """
         初始化回補服務。
@@ -119,7 +119,7 @@ class HistoricalBackfillService:
             db_path (str): SQLite 資料庫路徑。
             cache_dir (str): 原始 Tick Parquet 快取目錄。
             state_path (str): 回補進度 JSON 路徑。
-            reserve_mb (float): 每日須保留給增量同步排程之流量額度 (MB)。
+            reserve_mb (float): 每日須保留給增量同步排程之流量額度 (MB)，預設 40.0 MB。
         """
         self.db_path = db_path
         self.cache_dir = cache_dir
@@ -202,14 +202,16 @@ class HistoricalBackfillService:
 
     def _estimated_next_cost(self) -> int:
         """
-        估計下一個交易日之流量成本：取最近 5 日最大值 ×1.25；尚無樣本時採保守預設值。
+        估計下一個交易日之流量成本：取最近 5 日平均成本 × 1.15；尚無樣本時採保守預設值。
 
         返回:
             int: 預估 Bytes。
         """
         if not self._recent_costs:
             return DEFAULT_NEXT_DAY_COST_BYTES
-        return int(max(self._recent_costs[-5:]) * 1.25)
+        recent = self._recent_costs[-5:]
+        avg_cost = sum(recent) / len(recent)
+        return int(avg_cost * 1.15)
 
     def has_quota_for_next_day(self, api: Any) -> bool:
         """

@@ -81,7 +81,7 @@ class TestHistoryBackfill(unittest.TestCase):
             symbol="TMFJ6",
         )
         self.svc = HistoricalBackfillService(
-            db_path=self.db_path, cache_dir=self.cache_dir, state_path=self.state_path, reserve_mb=90.0
+            db_path=self.db_path, cache_dir=self.cache_dir, state_path=self.state_path, reserve_mb=40.0
         )
 
     def tearDown(self) -> None:

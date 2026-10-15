@@ -310,6 +310,7 @@ async def get_kline_endpoint(
         }
 
 
+@app.get("/", response_class=HTMLResponse)
 @app.get("/kline", response_class=HTMLResponse)
 async def serve_kline_page_endpoint():
     """
@@ -326,52 +327,112 @@ async def serve_kline_page_endpoint():
 
 
 # =====================================================================
-# 即時交易與 WebSocket 廣播模組路由分發 (Services/Live & Strategy)
+# =====================================================================
+# 即時交易、Telegram Bot 推播與 WebSocket 廣播模組路由分發 (Services/Live & Notification)
 # =====================================================================
 from fastapi import WebSocket, WebSocketDisconnect
 from services.live.websocket_manager import WebSocketManager
 from services.live.engine import LiveTradingEngine
+from services.live.live_signal_monitor import LiveSignalMonitor
+from services.notification.telegram_bot import TelegramBotService
 from services.strategy.models import StrategyConfig
 from services.strategy.bollinger_pullback import BollingerPullbackStrategy
 
 ws_manager = WebSocketManager()
-live_strategy = BollingerPullbackStrategy()
+telegram_bot_service = TelegramBotService(db_path=str(root_path / "data" / "market_data.db"))
 
 
 def _dispatch_live_event(event_type: str, data: dict) -> None:
-    """非同步事件廣播橋接函式。"""
+    """
+    非同步事件廣播橋接函式。
+
+    參數:
+        event_type (str): 事件類別名稱。
+        data (dict): 事件負載資料。
+
+    返回:
+        None
+    """
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            asyncio.create_task(ws_manager.broadcast({"type": event_type, "data": data}))
+            payload: dict = {"type": event_type, "data": data}
+            if event_type == "bar_update":
+                payload["bar"] = data
+            asyncio.create_task(ws_manager.broadcast(payload))
     except Exception:
         pass
 
 
-live_engine = LiveTradingEngine(strategy=live_strategy, on_event=_dispatch_live_event)
+live_signal_monitor = LiveSignalMonitor(
+    db_path=str(root_path / "data" / "market_data.db"),
+    telegram_service=telegram_bot_service,
+    on_ws_broadcast=_dispatch_live_event,
+)
+live_strategy = live_signal_monitor.strategy
+live_engine = live_signal_monitor.engine
+_monitor_task: Optional[asyncio.Task] = None
+
+
+async def _telegram_and_live_monitor_loop() -> None:
+    """
+    背景常駐協程：
+    1. 啟動時載入 SQLite 最近 300 根 5 分 K 完成布林與 ATR 指標暖機。
+    2. 每 3 秒透過非阻塞執行緒輪詢 Telegram Bot (@TMFR1_bot) 訂閱者與指令 (/start, /status, /signal, /backtest)，
+       並檢測定時同步寫入 SQLite 之最新秒 K 以觸發即時進出場訊號與 WebSocket 推播。
+
+    返回:
+        None
+    """
+    await asyncio.to_thread(live_signal_monitor.warmup_from_sqlite, 300)
+    while True:
+        try:
+            await asyncio.to_thread(telegram_bot_service.sync_subscribers_and_process_commands, 0)
+            await asyncio.to_thread(live_signal_monitor.poll_sqlite_new_bars)
+        except Exception:
+            pass
+        await asyncio.sleep(3.0)
+
+
+@app.on_event("startup")
+async def start_live_monitor_daemon() -> None:
+    """
+    FastAPI 啟動時自動掛載 Telegram Bot 與即時價格策略監控背景協程。
+
+    返回:
+        None
+    """
+    global _monitor_task
+    if _monitor_task is None or _monitor_task.done():
+        _monitor_task = asyncio.create_task(_telegram_and_live_monitor_loop())
 
 
 @app.websocket("/ws/live")
+@app.websocket("/ws/market")
 async def websocket_live_endpoint(websocket: WebSocket):
     """
     即時行情、K 棒更新、策略訊號與成交明細全雙工 WebSocket 連線端點。
-    提供前端圖表零延遲串流。
+    同時支援 /ws/live 與 /ws/market，連線時立即推送最新 SQLite 時序摘要與即時策略狀態。
     """
     await ws_manager.connect(websocket)
     try:
-        # 連線建立時立即推送一次當前策略與帳戶狀態
+        db_path = str(root_path / "data" / "market_data.db")
+        summary = SQLiteManager(db_path=db_path).get_summary()
         await websocket.send_json({
             "type": "initial_state",
-            "data": live_engine.get_status()
+            "db_summary": summary,
+            "data": {
+                **live_engine.get_status(),
+                "db_summary": summary
+            }
         })
         while True:
-            # 接收客戶端 Ping 或指令訊息
             data = await websocket.receive_text()
             if data == "ping":
                 await websocket.send_text("pong")
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
-    except Exception as e:
+    except Exception:
         ws_manager.disconnect(websocket)
 
 
@@ -446,7 +507,10 @@ async def get_live_status_endpoint() -> dict:
         return {
             "status": "SUCCESS",
             "message": "Live status retrieved successfully.",
-            "data": live_engine.get_status()
+            "data": {
+                **live_engine.get_status(),
+                "monitor": live_signal_monitor.get_live_snapshot()
+            }
         }
     except Exception as e:
         return {
@@ -461,6 +525,7 @@ async def get_live_status_endpoint() -> dict:
 async def feed_live_tick_endpoint(timestamp: int, price: float, volume: int) -> dict:
     """
     注入即時成交 Tick API 路由端點 (支援外部行情服務調用或盤中模擬測試)。
+    若觸發策略進場或出場，將同步自動推播至 Telegram Bot (@TMFR1_bot) 與 WebSocket。
 
     參數:
         timestamp (int): Unix Epoch 時間戳 (秒)。
@@ -471,6 +536,7 @@ async def feed_live_tick_endpoint(timestamp: int, price: float, volume: int) -> 
         dict: 包含 status, data, message 之標準化 JSON 回應。
     """
     try:
+        live_signal_monitor.latest_price = price
         live_engine.on_tick(timestamp=timestamp, price=price, volume=volume)
         return {
             "status": "SUCCESS",
@@ -489,4 +555,59 @@ async def feed_live_tick_endpoint(timestamp: int, price: float, volume: int) -> 
             "root_cause": str(type(e).__name__),
             "suggested_fix": "Please verify tick parameters (timestamp, price > 0, volume >= 0)."
         }
+
+
+@app.get("/api/telegram/status")
+async def get_telegram_status_endpoint() -> dict:
+    """
+    查詢 Telegram Bot (@TMFR1_bot) 連線狀態、已綁定訂閱者與即時監控狀態 API 端點。
+
+    返回:
+        dict: 包含 status, data, message 之標準化 JSON 回應。
+    """
+    try:
+        sync_res = await asyncio.to_thread(telegram_bot_service.sync_subscribers_and_process_commands, 0)
+        bot_info = await asyncio.to_thread(telegram_bot_service.get_bot_info)
+        return {
+            "status": "SUCCESS",
+            "message": "Telegram bot status retrieved successfully.",
+            "data": {
+                "bot_info": bot_info.get("result", {}),
+                "subscribed_chat_ids": telegram_bot_service.get_subscribed_chat_ids(),
+                "sync_result": sync_res,
+                "live_snapshot": live_signal_monitor.get_live_snapshot()
+            }
+        }
+    except Exception as e:
+        return {
+            "status": "ERROR",
+            "message": f"Failed to retrieve Telegram status: {str(e)}",
+            "root_cause": str(type(e).__name__),
+            "suggested_fix": "Please verify TELEGRAM_BOT_TOKEN in .env or Desktop/api.txt."
+        }
+
+
+@app.post("/api/telegram/notify-update")
+async def trigger_telegram_update_notify_endpoint() -> dict:
+    """
+    立即推播最新資料同步、歷史回補與儀表板更新成功通知至 Telegram Bot (@TMFR1_bot)。
+
+    返回:
+        dict: 包含 status, data, message 之標準化 JSON 回應。
+    """
+    try:
+        res = await asyncio.to_thread(telegram_bot_service.notify_update_success, None)
+        return {
+            "status": "SUCCESS",
+            "message": "Update notification processed.",
+            "data": res
+        }
+    except Exception as e:
+        return {
+            "status": "ERROR",
+            "message": f"Failed to send Telegram update notification: {str(e)}",
+            "root_cause": str(type(e).__name__),
+            "suggested_fix": "Please check TelegramBotService configuration."
+        }
+
 

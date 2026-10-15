@@ -81,18 +81,20 @@ class LiveTradingEngine:
 
     def _calculate_safe_qty(self, current_price: float) -> int:
         """
-        計算安全動態口數 (風控核心)。
+        計算安全動態口數 (風控核心 — 基準 A：130% 整戶原始保證金維持率控管，槓桿隨盤勢動態浮動)。
 
-        公式:
-            theoretical_qty = (equity * max_leverage) / (current_price * point_value)
-            margin_qty = equity / margin_req
-            safe_qty = floor(min(theoretical_qty, margin_qty))
+        參數:
+            current_price (float): 當前標的價格。
+
+        返回:
+            int: 符合維持率門檻之最大可開倉口數；若權益低於單口門檻則回傳 0。
         """
-        if self.equity <= 0 or current_price <= 0:
+        margin_req = float(getattr(self.config, "margin_req", 35050.0) or 35050.0)
+        min_ratio = float(getattr(self.config, "min_margin_ratio", 1.30) or 1.30)
+        required_per_lot = margin_req * max(1.0, min_ratio)
+        if self.equity < margin_req or self.equity < required_per_lot or current_price <= 0:
             return 0
-        theoretical_qty = (self.equity * self.config.max_leverage) / (current_price * self.config.point_value)
-        margin_qty = self.equity / self.config.margin_req
-        safe_qty = int(math.floor(min(theoretical_qty, margin_qty)))
+        safe_qty = int(math.floor(self.equity / required_per_lot))
         return max(0, safe_qty)
 
     def _calculate_friction_costs(self, entry_price: float, exit_price: float, qty: int) -> float:

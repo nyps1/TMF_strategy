@@ -491,9 +491,12 @@ def build_html_content(
     """
     data_json = json.dumps(intervals_data, ensure_ascii=False)
     strategies_json = json.dumps(multi_strategies_data, ensure_ascii=False)
-    bars_5m_count = len(intervals_data.get("5m", []))
+    bars_5m_list = intervals_data.get("5m", [])
+    bars_5m_count = len(bars_5m_list)
     bars_1m_list = intervals_data.get("1m", [])
     latest_bar_time = bars_1m_list[-1].get("datetime", "--") if bars_1m_list else "--"
+    earliest_bar_date = bars_5m_list[0].get("datetime", "2026-06-01")[:10] if bars_5m_list else "2026-06-01"
+    latest_bar_date = bars_5m_list[-1].get("datetime", "2026-10-15")[:10] if bars_5m_list else "2026-10-15"
 
     script_tag = f"<script>{standalone_js}</script>" if standalone_js else (
         '<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>'
@@ -2309,14 +2312,6 @@ def build_html_content(
                 </div>
             </div>
 
-            <!-- 交易特寫聚焦浮動橫幅 (支援上/下一筆逐筆復盤巡覽) -->
-            <div id="trade-focus-banner" class="trade-focus-banner" style="display: none;">
-                <button class="btn-nav-trade" onclick="navigateFocusedTrade(-1)" title="上一筆交易 (快捷鍵: [)">上一筆</button>
-                <div id="trade-focus-content" style="display: flex; align-items: center; gap: 10px;"></div>
-                <button class="btn-nav-trade" onclick="navigateFocusedTrade(1)" title="下一筆交易 (快捷鍵: ])">下一筆</button>
-                <button class="btn-close-focus" onclick="clearTradeFocus()" title="關閉特寫並恢復全景 (快捷鍵: Esc)">恢復全景</button>
-            </div>
-
             <div id="kline-container"></div>
             <div class="watermark">TMFR1 NEAR-MONTH - QUANTITATIVE WORKBENCH</div>
         </div>
@@ -2327,19 +2322,8 @@ def build_html_content(
         <!-- 下半部：策略績效全覽面板 (全畫面模式下佔滿 100% 畫面高) -->
         <div class="performance-section" id="performance-section">
 
-            <!-- 關鍵數據卡片 (擴充為 6 欄機構級指標) -->
+            <!-- 關鍵數據卡片 (擴充為 6 欄機構級指標，已依使用者要求移除頂部標題與策略收錄列) -->
             <div class="metrics-card">
-                <div class="metrics-header-row">
-                    <div class="metrics-title">
-                        <span>關鍵數據全覽</span>
-                        <span class="metrics-strat-indicator" id="current-strat-indicator">當前活躍策略: 布林_ATR基準 (14, 5)</span>
-                        <span style="font-size:11px; color:#089981; background:rgba(8,153,129,0.12); border:1px solid rgba(8,153,129,0.3); padding:2px 8px; border-radius:4px; font-weight:600;" id="latest-kbar-badge">K 棒最新收錄至: {latest_bar_time} (5 分 K 共 {bars_5m_count:,} 根)</span>
-                    </div>
-                    <div class="shortcut-hint-bar">
-                        <span>快捷鍵: <kbd class="kbd-tag">Space</kbd> 全畫面/雙圖</span>
-                        <span><kbd class="kbd-tag">[</kbd><kbd class="kbd-tag">]</kbd> 逐筆交易復盤</span>
-                    </div>
-                </div>
                 <div class="metrics-grid">
                     <!-- 1. 總損益 -->
                     <div class="metric-col">
@@ -2416,6 +2400,24 @@ def build_html_content(
                     <button class="perf-tool-btn highlight" id="btn-open-params-modal" title="微調策略參數並即時重新撮合回測">策略參數調校與即時回測</button>
                     <button class="perf-tool-btn" id="btn-toggle-compare-mode" title="切換累積損益、帳戶淨值或水下回撤圖">切換視圖模式</button>
                     <button class="perf-tool-btn" id="btn-fit-chart" title="適配全屏">適配縮放</button>
+                </div>
+            </div>
+
+            <!-- 回測區間與初始資金快捷控制列 -->
+            <div class="multi-legend-bar" id="backtest-quick-bar" style="background:#131620; border-bottom:1px solid #202636; padding:4px 16px; height:auto; min-height:34px; flex-wrap:wrap; gap:10px;">
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <span style="color:#00e5ff; font-weight:700;">回測區間:</span>
+                    <input type="date" id="quick-start-date" class="filter-select" value="{earliest_bar_date}" min="{earliest_bar_date}" max="{latest_bar_date}" style="padding:2px 6px; font-family:monospace;">
+                    <span style="color:#787b86;">~</span>
+                    <input type="date" id="quick-end-date" class="filter-select" value="{latest_bar_date}" min="{earliest_bar_date}" max="{latest_bar_date}" style="padding:2px 6px; font-family:monospace;">
+                    <button class="perf-tool-btn" id="btn-range-all" style="padding:2px 8px; font-size:11px;" title="選取資料庫全部可用區間">全區間</button>
+                    <button class="perf-tool-btn" id="btn-range-3m" style="padding:2px 8px; font-size:11px;" title="選取最近 3 個月">近 3 個月</button>
+                    <button class="perf-tool-btn" id="btn-range-1m" style="padding:2px 8px; font-size:11px;" title="選取最近 1 個月">近 1 個月</button>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <span style="color:#f0b90b; font-weight:700;">初始資金 (TWD):</span>
+                    <input type="number" id="quick-initial-capital" class="param-num-input" value="105150" min="35050" max="10000000" step="5000" style="width:105px; padding:3px 8px; font-weight:700; color:#f0b90b; border-color:#3a445e;">
+                    <button class="perf-tool-btn highlight" id="btn-apply-quick-backtest" style="padding:3px 12px; font-weight:700;">套用區間與本金</button>
                 </div>
             </div>
 
@@ -2760,12 +2762,33 @@ def build_html_content(
                     </div>
                 </div>
 
-                <!-- 區塊三：資金保證金維持率與交易成本 -->
+                <!-- 區塊三：回測區間、初始資金與保證金維持率風控 -->
                 <div class="params-section">
                     <div class="params-section-title">
-                        <span>保證金維持率風控 (原始保證金 35,050 元 ｜ 維持保證金 26,900 元) 與摩擦成本</span>
+                        <span>回測區間、初始資金與保證金維持率風控 (原始保證金 35,050 元 ｜ 維持保證金 26,900 元)</span>
                     </div>
                     <div class="params-grid">
+                        <div class="param-item">
+                            <div class="param-label-row">
+                                <span>回測起訖區間 (Start ~ End Date)</span>
+                                <span class="param-val-badge" id="val-badge-date-range">{earliest_bar_date} ~ {latest_bar_date}</span>
+                            </div>
+                            <div class="param-input-row">
+                                <input type="date" class="filter-select" id="modal-start-date" value="{earliest_bar_date}" min="{earliest_bar_date}" max="{latest_bar_date}" style="flex:1; padding:4px 6px; font-family:monospace;">
+                                <span style="color:#787b86;">~</span>
+                                <input type="date" class="filter-select" id="modal-end-date" value="{latest_bar_date}" min="{earliest_bar_date}" max="{latest_bar_date}" style="flex:1; padding:4px 6px; font-family:monospace;">
+                            </div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label-row">
+                                <span>初始資金 (Initial Capital TWD)</span>
+                                <span class="param-val-badge" id="val-badge-initial-capital">105,150 元</span>
+                            </div>
+                            <div class="param-input-row">
+                                <input type="range" class="param-range" id="range-initial-capital" min="45000" max="1000000" step="5000" value="105150">
+                                <input type="number" class="param-num-input" id="num-initial-capital" min="35050" max="10000000" step="5000" value="105150" style="width:92px;">
+                            </div>
+                        </div>
                         <div class="param-item">
                             <div class="param-label-row">
                                 <span>最低整戶維持率門檻 (基準 A %)</span>
@@ -3694,8 +3717,6 @@ def build_html_content(
         // 清除交易聚焦狀態並恢復全景
         function clearTradeFocus() {{
             currentFocusedTradeId = null;
-            const banner = document.getElementById('trade-focus-banner');
-            if (banner) banner.style.display = 'none';
             document.querySelectorAll('#trades-table-body tr').forEach(r => r.classList.remove('selected-trade-row'));
             if (klineChart) {{
                 klineChart.timeScale().fitContent();
@@ -3703,30 +3724,9 @@ def build_html_content(
             showToast('已恢復全景檢視', 'info');
         }}
 
-        // 顯示交易特寫橫幅
+        // 交易特寫橫幅已依使用者要求移除，僅保留 K 線區間自動縮放定位
         function showTradeFocusBanner(trade) {{
-            const banner = document.getElementById('trade-focus-banner');
-            const content = document.getElementById('trade-focus-content');
-            if (!banner || !content) return;
-
-            const strat = getActiveStrategy();
-            const totalCount = (strat.trades || []).length;
-            const isLong = trade.side === 'LONG';
-            const isProfit = (trade.net_pnl || 0) >= 0;
-            const pnlSign = isProfit ? '+' : '';
-            const pnlColor = isProfit ? '#089981' : '#f23645';
-            const sideColor = isLong ? '#089981' : '#f23645';
-            const sideText = isLong ? '買進做多' : '放空賣出';
-            const holdMins = Math.round(trade.hold_mins || ((trade.exit_ts - trade.entry_ts) / 60) || 0);
-
-            content.innerHTML = `
-                <span class="focus-badge" style="background:${{sideColor}};">#${{trade.trade_id}} / ${{totalCount}} ${{sideText}} (${{trade.qty || 1}}口)</span>
-                <span>進場: <b>${{trade.entry_time}}</b> @ <b>${{Number(trade.entry_price).toFixed(1)}}</b></span>
-                <span style="color:#787b86;">-&gt;</span>
-                <span>出場: <b>${{trade.exit_time}}</b> @ <b>${{Number(trade.exit_price).toFixed(1)}}</b> (${{trade.exit_reason}} ｜ ${{holdMins}}分)</span>
-                <span>損益: <b style="color:${{pnlColor}}; font-size:13px;">${{pnlSign}}${{Number(trade.net_pnl).toLocaleString('zh-TW', {{minimumFractionDigits: 1}})}} TWD</b></span>
-            `;
-            banner.style.display = 'flex';
+            return;
         }}
 
         // 渲染交易明細表格 (支援方向/結果/原因篩選與多欄位排序)
@@ -4095,7 +4095,23 @@ def build_html_content(
 
             initData() {{
                 const bars5m = KLINE_DATA['5m'] || [];
-                this.timePoints = bars5m.map(b => ({{
+                const stratAtr = STRATEGIES_DATA['atr'];
+                const initCap = (stratAtr && stratAtr.metrics && stratAtr.metrics.initialCapital)
+                    ? Number(stratAtr.metrics.initialCapital)
+                    : 105150;
+                this.initialCapital = initCap;
+
+                const cfg = (typeof strategyConfigs !== 'undefined' && strategyConfigs.atr) ? strategyConfigs.atr : {{}};
+                const startBound = cfg.start_date ? (String(cfg.start_date).trim() + ' 00:00:00') : '';
+                const endBound = cfg.end_date ? (String(cfg.end_date).trim() + ' 23:59:59') : '';
+
+                const filteredBars = bars5m.filter(b => {{
+                    if (startBound && b.datetime < startBound) return false;
+                    if (endBound && b.datetime > endBound) return false;
+                    return true;
+                }});
+
+                this.timePoints = (filteredBars.length > 0 ? filteredBars : bars5m).map(b => ({{
                     time: Number(b.time),
                     datetime: b.datetime
                 }}));
@@ -4116,7 +4132,7 @@ def build_html_content(
 
                 this.alignedPoints = [];
                 let lastVals = {{
-                    atr: {{ pnl: 0, equity: 105150, drawdown: 0 }}
+                    atr: {{ pnl: 0, equity: initCap, drawdown: 0 }}
                 }};
 
                 for (let i = 0; i < this.timePoints.length; i++) {{
@@ -4394,7 +4410,8 @@ def build_html_content(
                 }}
 
                 // 3. 基準線 (0 基準線 / 期初資金 / 水下 0 軸水面線)
-                const baseVal = (this.mode === 'EQUITY') ? 105150 : 0;
+                const curInitCap = this.initialCapital || 105150;
+                const baseVal = (this.mode === 'EQUITY') ? curInitCap : 0;
                 if (baseVal >= minVal && baseVal <= maxVal) {{
                     const baseY = getY(baseVal);
                     ctx.save();
@@ -4411,7 +4428,7 @@ def build_html_content(
                     ctx.textAlign = 'left';
                     const baseTitle = this.mode === 'PNL'
                         ? '0 損益基準線'
-                        : (this.mode === 'EQUITY' ? '期初資金基準線 (105,150 TWD)' : '歷史最高淨值基準面 (Drawdown = 0)');
+                        : (this.mode === 'EQUITY' ? `期初資金基準線 (${{Math.round(curInitCap).toLocaleString('zh-TW')}} TWD)` : '歷史最高淨值基準面 (Drawdown = 0)');
                     ctx.fillText(baseTitle, padLeft + 6, baseY - 6);
                     ctx.restore();
                 }}
@@ -4484,9 +4501,11 @@ def build_html_content(
             document.querySelectorAll('.mode-pill-btn').forEach(btn => {{
                 btn.classList.toggle('active', btn.dataset.cmode === mode);
             }});
+            const strat = getActiveStrategy();
+            const initCapStr = (strat && strat.metrics && strat.metrics.initialCapitalStr) ? strat.metrics.initialCapitalStr : '105,150';
             if (txtAxisHint) {{
                 if (mode === 'PNL') txtAxisHint.textContent = '橫軸 X = 時間時序推進 ｜ 縱軸 Y = 累積淨損益 (TWD)';
-                else if (mode === 'EQUITY') txtAxisHint.textContent = '橫軸 X = 時間時序推進 ｜ 縱軸 Y = 帳戶總淨值 (TWD，含期初本金 105,150)';
+                else if (mode === 'EQUITY') txtAxisHint.textContent = `橫軸 X = 時間時序推進 ｜ 縱軸 Y = 帳戶總淨值 (TWD，含期初本金 ${{initCapStr}})`;
                 else txtAxisHint.textContent = '橫軸 X = 時間時序推進 ｜ 縱軸 Y = 水下回撤深度 (Drawdown TWD，越靠近 0 軸代表抗跌與修復力越強)';
             }}
         }}
@@ -4509,9 +4528,13 @@ def build_html_content(
 
             setTrades() {{
                 const strat = getActiveStrategy();
+                const initCap = (strat && strat.metrics && strat.metrics.initialCapital)
+                    ? Number(strat.metrics.initialCapital)
+                    : 105150;
+                this.initialCapital = initCap;
                 this.trades = strat.trades || [];
                 this.equityPoints = [
-                    {{ trade_id: 0, cum_pnl: 0, equity_after: 105150, net_pnl: 0, exit_reason: '期初基準', side: '--', entry_time: '--', exit_time: '--' }},
+                    {{ trade_id: 0, cum_pnl: 0, equity_after: initCap, net_pnl: 0, exit_reason: '期初基準', side: '--', entry_time: '--', exit_time: '--' }},
                     ...this.trades
                 ];
             }}
@@ -4578,6 +4601,7 @@ def build_html_content(
                 const isWin = pt.net_pnl >= 0;
                 const pnlSign = isWin ? '+' : '';
                 const cumSign = pt.cum_pnl >= 0 ? '+' : '';
+                const curInitCap = this.initialCapital || 105150;
 
                 let html = '';
                 if (isOrigin) {{
@@ -4586,7 +4610,7 @@ def build_html_content(
                             <span>期初基準狀態</span>
                             <span style="color:#787b86;">Trade #0</span>
                         </div>
-                        <div class="tt-row"><span class="tt-label">初始資金:</span><span class="tt-val">105,150.0 TWD</span></div>
+                        <div class="tt-row"><span class="tt-label">初始資金:</span><span class="tt-val">${{Number(curInitCap).toLocaleString('zh-TW', {{minimumFractionDigits: 1}})}} TWD</span></div>
                         <div class="tt-row"><span class="tt-label">累積損益:</span><span class="tt-val">0.0 TWD</span></div>
                     `;
                 }} else {{
@@ -4724,6 +4748,7 @@ def build_html_content(
 
                 // 3. 0 損益基準橫線
                 const zeroY = getY(0);
+                const curInitCap = this.initialCapital || 105150;
                 if (zeroY >= padTop && zeroY <= padTop + chartH) {{
                     ctx.save();
                     ctx.setLineDash([4, 4]);
@@ -4737,7 +4762,7 @@ def build_html_content(
                     ctx.fillStyle = '#d1d4dc';
                     ctx.font = '10px sans-serif';
                     ctx.textAlign = 'left';
-                    ctx.fillText('0 損益基準線 (本金 105,150 TWD)', padLeft + 6, zeroY - 6);
+                    ctx.fillText(`0 損益基準線 (本金 ${{Math.round(curInitCap).toLocaleString('zh-TW')}} TWD)`, padLeft + 6, zeroY - 6);
                     ctx.restore();
                 }}
 
@@ -5004,8 +5029,12 @@ def build_html_content(
                 if (count === atrSigLen) atrSig[i] = sum / atrSigLen;
             }}
 
-            // 3. 撮合回測狀態機 (基準 A: 130% 整戶原始保證金維持率 + 動態浮動槓桿)
-            const initialCap = Number(config.initial_capital) || 105150.0;
+            // 3. 撮合回測狀態機 (基準 A: 130% 整戶原始保證金維持率 + 動態浮動槓桿 + 自訂回測區間與初始資金)
+            const initialCap = Math.max(35050.0, Number(config.initial_capital) || 105150.0);
+            const startDateStr = (config.start_date || '').trim();
+            const endDateStr = (config.end_date || '').trim();
+            const startBoundary = startDateStr ? `${{startDateStr}} 00:00:00` : '';
+            const endBoundary = endDateStr ? `${{endDateStr}} 23:59:59` : '';
             const pointValue = 10.0;
             const marginReq = 35050.0;
             const maintMargin = 26900.0;
@@ -5059,6 +5088,14 @@ def build_html_content(
                 const curClose = closes[i];
                 const curTimeStr = datetimes[i];
                 const curTs = times[i];
+
+                // 回測區間邊界過濾 (指標已在全量 bars 預先計算完畢，確保區間首根 K 棒具備完整暖機)
+                if (startBoundary && curTimeStr < startBoundary) {{
+                    continue;
+                }}
+                if (endBoundary && curTimeStr > endBoundary) {{
+                    break;
+                }}
 
                 // A. 進場執行 (Bar 3)：嚴格執行原始保證金開倉門檻與基準 A (130% 整戶維持率)
                 if (entryReadySide !== 'NONE' && posSide === 'NONE') {{
@@ -5277,6 +5314,8 @@ def build_html_content(
                 initialCapitalStr: Math.round(initialCap).toLocaleString('zh-TW'),
                 finalEquity: Math.round(equity * 100) / 100,
                 finalEquityStr: Math.round(equity).toLocaleString('zh-TW'),
+                startDate: startDateStr || (datetimes[0] ? datetimes[0].slice(0, 10) : ''),
+                endDate: endDateStr || (datetimes[n - 1] ? datetimes[n - 1].slice(0, 10) : ''),
                 avgWin: Math.round(avgWin),
                 avgWinStr: `+${{Math.round(avgWin).toLocaleString('zh-TW')}}`,
                 avgLoss: Math.round(avgLoss),
@@ -5337,7 +5376,9 @@ def build_html_content(
             }};
         }}
 
-        // 策略參數集中配置庫 (僅保留布林_ATR基準 + 基準 A 130% 整戶維持率控管)
+        // 策略參數集中配置庫 (僅保留布林_ATR基準 + 基準 A 130% 整戶維持率控管 + 自訂區間與本金)
+        const EARLIEST_BAR_DATE = '{earliest_bar_date}';
+        const LATEST_BAR_DATE = '{latest_bar_date}';
         const strategyConfigs = {{
             atr: {{
                 strategy_name: '布林_ATR基準',
@@ -5347,6 +5388,9 @@ def build_html_content(
                 pullback_ratio: 0.25,
                 atr_length: 14,
                 atr_sig_length: 5,
+                initial_capital: 105150.0,
+                start_date: '{earliest_bar_date}',
+                end_date: '{latest_bar_date}',
                 min_margin_ratio: 1.30,
                 max_leverage: 7.0,
                 commission: 18.0,
@@ -5440,9 +5484,24 @@ def build_html_content(
             }}
         }}
 
+        // 同步主畫面回測區間與初始資金快捷控制列
+        function syncQuickBacktestBar(stratKey) {{
+            const cfg = strategyConfigs[stratKey || 'atr'];
+            if (!cfg) return;
+            const qStart = document.getElementById('quick-start-date');
+            const qEnd = document.getElementById('quick-end-date');
+            const qCap = document.getElementById('quick-initial-capital');
+            if (qStart) qStart.value = cfg.start_date || EARLIEST_BAR_DATE;
+            if (qEnd) qEnd.value = cfg.end_date || LATEST_BAR_DATE;
+            if (qCap) qCap.value = Math.round(Number(cfg.initial_capital) || 105150);
+        }}
+
         // 一鍵套用最佳化參數組合或恢復基準配置
         function applyPresetProfile(profileName) {{
             if (profileName === 'best_margin') {{
+                const curStart = strategyConfigs.atr.start_date || EARLIEST_BAR_DATE;
+                const curEnd = strategyConfigs.atr.end_date || LATEST_BAR_DATE;
+                const curCap = Number(strategyConfigs.atr.initial_capital) || 105150.0;
                 strategyConfigs.atr = {{
                     strategy_name: '布林_ATR基準',
                     exit_mode: 'atr',
@@ -5451,6 +5510,9 @@ def build_html_content(
                     pullback_ratio: 0.40,
                     atr_length: 14,
                     atr_sig_length: 4,
+                    initial_capital: curCap,
+                    start_date: curStart,
+                    end_date: curEnd,
                     min_margin_ratio: 1.30,
                     max_leverage: 8.0,
                     commission: 18.0,
@@ -5532,12 +5594,25 @@ def build_html_content(
             setFieldSync('atr-len', cfg.atr_length);
             setFieldSync('atr-sig', cfg.atr_sig_length);
 
+            const mStart = document.getElementById('modal-start-date');
+            const mEnd = document.getElementById('modal-end-date');
+            const bDate = document.getElementById('val-badge-date-range');
+            const sDate = cfg.start_date || EARLIEST_BAR_DATE;
+            const eDate = cfg.end_date || LATEST_BAR_DATE;
+            if (mStart) mStart.value = sDate;
+            if (mEnd) mEnd.value = eDate;
+            if (bDate) bDate.textContent = `${{sDate}} ~ ${{eDate}}`;
+
+            setFieldSync('initial-capital', Math.round(Number(cfg.initial_capital) || 105150));
+
             const ratioPct = Math.round((Number(cfg.min_margin_ratio) || 1.30) * 100);
             setFieldSync('margin-ratio', ratioPct);
             setFieldSync('leverage', cfg.max_leverage);
             document.getElementById('num-commission').value = cfg.commission;
             document.getElementById('val-badge-commission').textContent = `${{cfg.commission}} 元`;
             setFieldSync('slippage', cfg.slippage);
+
+            syncQuickBacktestBar(stratKey);
 
             const curM = STRATEGIES_DATA[stratKey].metrics;
             if (curM) updateModalPreviewBox(curM);
@@ -5551,6 +5626,7 @@ def build_html_content(
             if (num) num.value = val;
             if (badge) {{
                 if (idPrefix === 'pullback') badge.textContent = `${{val}} (${{Math.round(val * 100)}}% K棒)`;
+                else if (idPrefix === 'initial-capital') badge.textContent = `${{Math.round(Number(val) || 0).toLocaleString('zh-TW')}} 元`;
                 else if (idPrefix === 'margin-ratio') {{
                     const reqPerLot = Math.round(35050 * (Number(val) / 100));
                     badge.textContent = `${{val}}% (單口 ${{reqPerLot.toLocaleString('zh-TW')}} 元)`;
@@ -5559,6 +5635,41 @@ def build_html_content(
                 else if (idPrefix === 'slippage') badge.textContent = `${{val}} 點`;
                 else badge.textContent = val;
             }}
+        }}
+
+        // 套用主畫面快捷回測區間與初始資金
+        function applyQuickBacktestSettings(customStart, customEnd) {{
+            const qStart = document.getElementById('quick-start-date');
+            const qEnd = document.getElementById('quick-end-date');
+            const qCap = document.getElementById('quick-initial-capital');
+
+            let sDate = customStart || (qStart ? qStart.value : EARLIEST_BAR_DATE) || EARLIEST_BAR_DATE;
+            let eDate = customEnd || (qEnd ? qEnd.value : LATEST_BAR_DATE) || LATEST_BAR_DATE;
+            if (sDate > eDate) {{
+                const tmp = sDate;
+                sDate = eDate;
+                eDate = tmp;
+            }}
+
+            let capVal = qCap ? Number(qCap.value) : 105150;
+            if (isNaN(capVal) || capVal < 35050) {{
+                capVal = 35050;
+                showToast('初始資金最低不得低於 1 口原始保證金 (35,050 元)，已自動校正為 35,050 元', 'info');
+            }}
+
+            const cfg = strategyConfigs.atr;
+            cfg.start_date = sDate;
+            cfg.end_date = eDate;
+            cfg.initial_capital = capVal;
+
+            populateModalInputs('atr');
+            executeDynamicBacktest('atr', cfg, true);
+
+            const m = STRATEGIES_DATA.atr.metrics;
+            showToast(
+                `已套用回測區間 [${{sDate}} ~ ${{eDate}}] ｜ 初始資金: ${{Math.round(capVal).toLocaleString('zh-TW')}} TWD ｜ 成交 ${{m.totalTrades}} 筆 ｜ 淨利: ${{m.totalNetProfitStr}} TWD`,
+                'success'
+            );
         }}
 
         function initParamsModal() {{
@@ -5573,7 +5684,7 @@ def build_html_content(
 
             const fieldKeys = [
                 'bb-len', 'bb-mult', 'pullback',
-                'atr-len', 'atr-sig', 'margin-ratio', 'leverage', 'slippage'
+                'atr-len', 'atr-sig', 'initial-capital', 'margin-ratio', 'leverage', 'slippage'
             ];
 
             fieldKeys.forEach(k => {{
@@ -5586,6 +5697,7 @@ def build_html_content(
                         num.value = range.value;
                         if (badge) {{
                             if (k === 'pullback') badge.textContent = `${{range.value}} (${{Math.round(range.value * 100)}}% K棒)`;
+                            else if (k === 'initial-capital') badge.textContent = `${{Math.round(Number(range.value) || 0).toLocaleString('zh-TW')}} 元`;
                             else if (k === 'margin-ratio') {{
                                 const reqPerLot = Math.round(35050 * (Number(range.value) / 100));
                                 badge.textContent = `${{range.value}}% (單口 ${{reqPerLot.toLocaleString('zh-TW')}} 元)`;
@@ -5599,6 +5711,7 @@ def build_html_content(
                         range.value = num.value;
                         if (badge) {{
                             if (k === 'pullback') badge.textContent = `${{num.value}} (${{Math.round(num.value * 100)}}% K棒)`;
+                            else if (k === 'initial-capital') badge.textContent = `${{Math.round(Number(num.value) || 0).toLocaleString('zh-TW')}} 元`;
                             else if (k === 'margin-ratio') {{
                                 const reqPerLot = Math.round(35050 * (Number(num.value) / 100));
                                 badge.textContent = `${{num.value}}% (單口 ${{reqPerLot.toLocaleString('zh-TW')}} 元)`;
@@ -5610,6 +5723,17 @@ def build_html_content(
                     }});
                 }}
             }});
+
+            const mStart = document.getElementById('modal-start-date');
+            const mEnd = document.getElementById('modal-end-date');
+            const bDate = document.getElementById('val-badge-date-range');
+            const updateDateBadge = () => {{
+                if (mStart && mEnd && bDate) {{
+                    bDate.textContent = `${{mStart.value || EARLIEST_BAR_DATE}} ~ ${{mEnd.value || LATEST_BAR_DATE}}`;
+                }}
+            }};
+            if (mStart) mStart.addEventListener('change', updateDateBadge);
+            if (mEnd) mEnd.addEventListener('change', updateDateBadge);
 
             const selSizing = document.getElementById('sel-sizing-mode');
             if (selSizing) {{
@@ -5642,12 +5766,30 @@ def build_html_content(
                     cfg.atr_length = Number(document.getElementById('num-atr-len').value);
                     cfg.atr_sig_length = Number(document.getElementById('num-atr-sig').value);
 
+                    let sDate = mStart ? mStart.value : EARLIEST_BAR_DATE;
+                    let eDate = mEnd ? mEnd.value : LATEST_BAR_DATE;
+                    if (sDate > eDate) {{
+                        const tmp = sDate;
+                        sDate = eDate;
+                        eDate = tmp;
+                        if (mStart) mStart.value = sDate;
+                        if (mEnd) mEnd.value = eDate;
+                        updateDateBadge();
+                    }}
+                    cfg.start_date = sDate;
+                    cfg.end_date = eDate;
+
+                    const capInput = document.getElementById('num-initial-capital');
+                    cfg.initial_capital = Math.max(35050, Number(capInput ? capInput.value : 105150) || 105150);
+                    setFieldSync('initial-capital', cfg.initial_capital);
+
                     const ratioPctEl = document.getElementById('num-margin-ratio');
                     if (ratioPctEl) cfg.min_margin_ratio = Math.max(1.0, Number(ratioPctEl.value) / 100.0);
                     cfg.max_leverage = Number(document.getElementById('num-leverage').value);
                     cfg.commission = Number(document.getElementById('num-commission').value);
                     cfg.slippage = Number(document.getElementById('num-slippage').value);
 
+                    syncQuickBacktestBar(activeModalStrat);
                     executeDynamicBacktest(activeModalStrat, cfg);
                 }});
             }}
@@ -5667,6 +5809,41 @@ def build_html_content(
             if (btnApplyBest) btnApplyBest.addEventListener('click', () => applyPresetProfile('best_margin'));
             if (btnQuickBest) btnQuickBest.addEventListener('click', () => applyPresetProfile('best_margin'));
             if (btnApplyBase) btnApplyBase.addEventListener('click', () => applyPresetProfile('baseline_notional'));
+
+            // 綁定主畫面回測區間與初始資金快捷控制列事件
+            const btnApplyQuick = document.getElementById('btn-apply-quick-backtest');
+            if (btnApplyQuick) {{
+                btnApplyQuick.addEventListener('click', () => applyQuickBacktestSettings());
+            }}
+            const qCapInput = document.getElementById('quick-initial-capital');
+            if (qCapInput) {{
+                qCapInput.addEventListener('keydown', (e) => {{
+                    if (e.key === 'Enter') applyQuickBacktestSettings();
+                }});
+            }}
+
+            const shiftMonthsFromLatest = (monthsBack) => {{
+                const parts = LATEST_BAR_DATE.split('-').map(Number);
+                const d = new Date(parts[0], parts[1] - 1 - monthsBack, parts[2]);
+                const yyyy = d.getFullYear();
+                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                const dd = String(d.getDate()).padStart(2, '0');
+                const target = `${{yyyy}}-${{mm}}-${{dd}}`;
+                return target < EARLIEST_BAR_DATE ? EARLIEST_BAR_DATE : target;
+            }};
+
+            const btnRangeAll = document.getElementById('btn-range-all');
+            const btnRange3m = document.getElementById('btn-range-3m');
+            const btnRange1m = document.getElementById('btn-range-1m');
+            if (btnRangeAll) {{
+                btnRangeAll.addEventListener('click', () => applyQuickBacktestSettings(EARLIEST_BAR_DATE, LATEST_BAR_DATE));
+            }}
+            if (btnRange3m) {{
+                btnRange3m.addEventListener('click', () => applyQuickBacktestSettings(shiftMonthsFromLatest(3), LATEST_BAR_DATE));
+            }}
+            if (btnRange1m) {{
+                btnRange1m.addEventListener('click', () => applyQuickBacktestSettings(shiftMonthsFromLatest(1), LATEST_BAR_DATE));
+            }}
         }}
 
         // 切換活躍策略
@@ -5930,13 +6107,24 @@ def build_html_content(
             }}, 3000);
         }}
 
-        // WebSocket 客戶端
+        // WebSocket 客戶端 (本地即時串流與最新資料庫狀態同步)
         function initWebSocketClient() {{
             const badge = document.getElementById('live-status-badge');
             const text = document.getElementById('live-status-text');
+            const bars5m = KLINE_DATA['5m'] || [];
+            const latestBarStr = bars5m.length > 0 ? (bars5m[bars5m.length - 1].datetime || '').slice(5, 16) : '';
+
+            // 預設先顯示已載入最新歷史與增量資料
+            if (badge) badge.className = 'live-badge online';
+            if (text) text.textContent = latestBarStr ? `資料已同步 (${{latestBarStr}})` : '資料已同步';
+
+            if (window.location.protocol === 'https:') {{
+                return;
+            }}
 
             function connect() {{
-                const wsUrl = `ws://${{window.location.hostname || '127.0.0.1'}}:8000/ws/market`;
+                const host = (window.location.hostname && window.location.hostname !== '') ? window.location.hostname : '127.0.0.1';
+                const wsUrl = `ws://${{host}}:8000/ws/market`;
                 let ws = null;
                 try {{
                     ws = new WebSocket(wsUrl);
@@ -5945,13 +6133,39 @@ def build_html_content(
                 }}
 
                 ws.onopen = () => {{
-                    if (badge) {{ badge.className = 'live-badge online'; }}
-                    if (text) {{ text.textContent = '串流: 連線中'; }}
+                    if (badge) badge.className = 'live-badge online';
+                    if (text) text.textContent = latestBarStr ? `串流: 已連線 (${{latestBarStr}})` : '串流: 已連線';
+                }};
+
+                ws.onmessage = (event) => {{
+                    try {{
+                        const msg = JSON.parse(event.data);
+                        if (msg.type === 'initial_state' && msg.db_summary && msg.db_summary.max_ts) {{
+                            const dbMaxShort = String(msg.db_summary.max_ts).slice(5, 16);
+                            if (badge) badge.className = 'live-badge online';
+                            if (text) text.textContent = `串流: 已連線 (${{dbMaxShort}})`;
+                        }} else if (msg.type === 'bar_update' && msg.bar) {{
+                            const bar = msg.bar;
+                            if (badge) badge.className = 'live-badge online';
+                            if (text) text.textContent = `串流: ${{bar.close}} (${{String(bar.datetime || '').slice(11, 19)}})`;
+                            if (candlestickSeries && currentInterval === '1m' && bar.time) {{
+                                candlestickSeries.update({{
+                                    time: bar.time,
+                                    open: bar.open,
+                                    high: bar.high,
+                                    low: bar.low,
+                                    close: bar.close
+                                }});
+                            }}
+                        }}
+                    }} catch (err) {{
+                        // 忽略非 JSON 訊號
+                    }}
                 }};
 
                 ws.onclose = () => {{
-                    if (badge) {{ badge.className = 'live-badge offline'; }}
-                    if (text) {{ text.textContent = '串流: 離線'; }}
+                    if (badge) badge.className = 'live-badge online';
+                    if (text) text.textContent = latestBarStr ? `最新資料 (${{latestBarStr}})` : '最新資料已載入';
                     setTimeout(connect, 5000);
                 }};
 
@@ -6007,7 +6221,7 @@ def build_html_content(
     return html
 
 
-DASHBOARD_HISTORY_START: str = "2026-07-22"  # 儀表板與回測之固定時間窗起點 (回補持續往前推進時維持不變)
+DASHBOARD_HISTORY_START: str = "2024-01-01"  # 載入 SQLite 內所有已回補與每日同步之完整歷史區間 (目前自 2026-06-01 起)
 
 
 def generate_dashboard(
