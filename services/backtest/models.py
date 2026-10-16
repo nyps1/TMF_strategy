@@ -47,6 +47,16 @@ class BacktestConfig(BaseModel):
     bb_length: int = Field(default=30, description="布林通道 SMA 週期長度")
     bb_mult: float = Field(default=1.75, description="布林通道標準差乘數")
     pullback_ratio: float = Field(default=0.25, description="拉回確認比例 (預設 0.25 即 25% K棒)")
+
+    # 大週期均線共振與情境三動能延續設定 (方案一)
+    enable_htf_continuation: bool = Field(
+        default=True,
+        description="是否開放情境三動能延續追價 (Bar 2 超越 Bar 1 收盤價時，須通過 30m 與 1h 均線雙重同向斜率過濾)"
+    )
+    htf_ma_length: int = Field(
+        default=20,
+        description="大週期 (30 分 K 與 1 小時 K) 趨勢過濾之 SMA 均線週期長度"
+    )
     
     # 出場模式設定 (atr / donchian / supertrend)
     exit_mode: str = Field(default="atr", description="出場模式: atr / donchian / supertrend")

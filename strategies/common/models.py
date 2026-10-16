@@ -68,6 +68,14 @@ class StrategyConfig(BaseModel):
     atr_length: int = Field(default=14, description="真實波動區間 (ATR) 計算週期")
     atr_tp_multiplier: float = Field(default=2.0, description="動態 ATR 停利倍數")
     pullback_ratio: float = Field(default=0.25, description="嚴格拉回確認閥值 (如頂部/底部 1/4 區域)")
+    enable_htf_continuation: bool = Field(
+        default=True,
+        description="是否開放情境三動能延續追價 (須通過 30m 與 1h 均線雙重同向斜率過濾)"
+    )
+    htf_ma_length: int = Field(
+        default=20,
+        description="大週期 (30 分 K 與 1 小時 K) 趨勢過濾之 SMA 均線週期長度"
+    )
 
     # 資金管理與風控參數 (決策者風控配置)
     initial_capital: float = Field(default=105150.0, description="初始本金 (TWD)")

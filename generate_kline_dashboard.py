@@ -445,6 +445,8 @@ def run_all_strategies_backtest(bars_5m: List[Dict[str, Any]]) -> Dict[str, Any]
         atr_sig_length=5,
         bb_length=30,
         bb_mult=1.75,
+        enable_htf_continuation=True,
+        htf_ma_length=20,
         initial_capital=105150.0,
         margin_req=35050.0,
         maint_margin=26900.0,
@@ -2726,6 +2728,28 @@ def build_html_content(
                                     <option value="notional">名目合約槓桿上限模式 (Notional Cap)</option>
                                     <option value="fixed_one_lot">固定單口模式 (Fixed 1 Lot)</option>
                                 </select>
+                            </div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label-row">
+                                <span>方案一：情境三動能延續 (30m &amp; 1h 同向)</span>
+                                <span class="param-val-badge" id="val-badge-htf-cont">啟用 (30m+1h 共振)</span>
+                            </div>
+                            <div class="param-input-row">
+                                <select class="filter-select" id="sel-htf-cont" style="width:100%; padding:5px 8px;">
+                                    <option value="true">啟用方案一：30m &amp; 1h 均線雙重同向過濾情境三 (推薦)</option>
+                                    <option value="false">關閉：僅保留情境一標準淺幅拉回 (原基準版)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label-row">
+                                <span>大週期趨勢均線週期 (30m &amp; 1h MA)</span>
+                                <span class="param-val-badge" id="val-badge-htf-ma">20 MA</span>
+                            </div>
+                            <div class="param-input-row">
+                                <input type="range" class="param-range" id="range-htf-ma" min="5" max="60" step="1" value="20">
+                                <input type="number" class="param-num-input" id="num-htf-ma" min="5" max="60" step="1" value="20">
                             </div>
                         </div>
                     </div>
@@ -5056,6 +5080,61 @@ def build_html_content(
                 if (count === atrSigLen) atrSig[i] = sum / atrSigLen;
             }}
 
+            // 2.5 計算大週期 (30m 與 1h) SMA 斜率並以無偷看未來規則對齊回 5m K 棒 (方案一)
+            const enableHtfCont = (config.enable_htf_continuation !== undefined)
+                ? (config.enable_htf_continuation === true || config.enable_htf_continuation === 'true')
+                : true;
+            const htfMaLen = Math.max(2, Number(config.htf_ma_length) || 20);
+            const htf30mSlope = new Float64Array(n);
+            const htf1hSlope = new Float64Array(n);
+
+            if (enableHtfCont) {{
+                const bars30m = (typeof KLINE_DATA !== 'undefined' && KLINE_DATA['30m']) ? KLINE_DATA['30m'] : [];
+                const bars1h = (typeof KLINE_DATA !== 'undefined' && KLINE_DATA['1h']) ? KLINE_DATA['1h'] : [];
+                const n30 = bars30m.length;
+                const n1h = bars1h.length;
+
+                const s30Raw = new Float64Array(n30);
+                const closeTs30 = new Float64Array(n30);
+                let sum30 = 0;
+                let ma30Prev = NaN;
+                for (let k = 0; k < n30; k++) {{
+                    closeTs30[k] = bars30m[k].time + 1500; // 標籤 T 於 T + 25m (1500s) 完整收盤
+                    sum30 += bars30m[k].close;
+                    if (k >= htfMaLen) sum30 -= bars30m[k - htfMaLen].close;
+                    if (k >= htfMaLen - 1) {{
+                        const maCur = sum30 / htfMaLen;
+                        if (!isNaN(ma30Prev)) s30Raw[k] = maCur - ma30Prev;
+                        ma30Prev = maCur;
+                    }}
+                }}
+
+                const s1hRaw = new Float64Array(n1h);
+                const closeTs1h = new Float64Array(n1h);
+                let sum1h = 0;
+                let ma1hPrev = NaN;
+                for (let k = 0; k < n1h; k++) {{
+                    closeTs1h[k] = bars1h[k].time + 3300; // 標籤 T 於 T + 55m (3300s) 完整收盤
+                    sum1h += bars1h[k].close;
+                    if (k >= htfMaLen) sum1h -= bars1h[k - htfMaLen].close;
+                    if (k >= htfMaLen - 1) {{
+                        const maCur = sum1h / htfMaLen;
+                        if (!isNaN(ma1hPrev)) s1hRaw[k] = maCur - ma1hPrev;
+                        ma1hPrev = maCur;
+                    }}
+                }}
+
+                let p30 = -1;
+                let p1h = -1;
+                for (let i = 0; i < n; i++) {{
+                    const t5 = times[i];
+                    while (p30 + 1 < n30 && closeTs30[p30 + 1] <= t5) p30++;
+                    while (p1h + 1 < n1h && closeTs1h[p1h + 1] <= t5) p1h++;
+                    if (p30 >= 0) htf30mSlope[i] = s30Raw[p30];
+                    if (p1h >= 0) htf1hSlope[i] = s1hRaw[p1h];
+                }}
+            }}
+
             // 3. 撮合回測狀態機 (基準 A: 130% 整戶原始保證金維持率 + 動態浮動槓桿 + 自訂回測區間與初始資金)
             const initialCap = Math.max(35050.0, Number(config.initial_capital) || 105150.0);
             const startDateStr = (config.start_date || '').trim();
@@ -5231,18 +5310,22 @@ def build_html_content(
                     }}
                 }}
 
-                // C. 第二根確認棒與第一根訊號棒判斷
+                // C. 第二根確認棒與第一根訊號棒判斷 (方案一：情境一標準拉回 + 30m & 1h 均線雙重同向過濾情境三)
                 if (posSide === 'NONE' && entryReadySide === 'NONE') {{
                     if (pendingSignalSide !== 'NONE' && (i - 1 === signalBarIdx)) {{
+                        const s30 = htf30mSlope[i];
+                        const s1h = htf1hSlope[i];
                         if (pendingSignalSide === 'LONG') {{
-                            const isConfirmed = (curClose <= signalBarClose) && (curClose >= signalBarQ1);
-                            if (isConfirmed) {{
+                            const isPullback = (curClose <= signalBarClose) && (curClose >= signalBarQ1);
+                            const isCont = enableHtfCont && (curClose > signalBarClose) && (s30 > 0) && (s1h > 0);
+                            if (isPullback || isCont) {{
                                 entryReadySide = 'LONG';
                                 entrySlPrice = signalBarExtreme;
                             }}
                         }} else if (pendingSignalSide === 'SHORT') {{
-                            const isConfirmed = (curClose >= signalBarClose) && (curClose <= signalBarQ1);
-                            if (isConfirmed) {{
+                            const isPullback = (curClose >= signalBarClose) && (curClose <= signalBarQ1);
+                            const isCont = enableHtfCont && (curClose < signalBarClose) && (s30 < 0) && (s1h < 0);
+                            if (isPullback || isCont) {{
                                 entryReadySide = 'SHORT';
                                 entrySlPrice = signalBarExtreme;
                             }}
@@ -5403,7 +5486,7 @@ def build_html_content(
             }};
         }}
 
-        // 策略參數集中配置庫 (僅保留布林_ATR基準 + 基準 A 130% 整戶維持率控管 + 自訂區間與本金)
+        // 策略參數集中配置庫 (僅保留布林_ATR基準 + 基準 A 130% 整戶維持率控管 + 方案一 30m&1h 20MA 共振)
         const EARLIEST_BAR_DATE = '{earliest_bar_date}';
         const LATEST_BAR_DATE = '{latest_bar_date}';
         const strategyConfigs = {{
@@ -5413,6 +5496,8 @@ def build_html_content(
                 bb_length: 30,
                 bb_mult: 1.75,
                 pullback_ratio: 0.25,
+                enable_htf_continuation: true,
+                htf_ma_length: 20,
                 atr_length: 14,
                 atr_sig_length: 5,
                 initial_capital: 105150.0,
@@ -5535,6 +5620,8 @@ def build_html_content(
                     bb_length: 30,
                     bb_mult: 1.80,
                     pullback_ratio: 0.40,
+                    enable_htf_continuation: true,
+                    htf_ma_length: 20,
                     atr_length: 14,
                     atr_sig_length: 4,
                     initial_capital: curCap,
@@ -5549,12 +5636,12 @@ def build_html_content(
                 executeDynamicBacktest('atr', strategyConfigs.atr, true);
                 populateModalInputs('atr');
                 const atrPnl = STRATEGIES_DATA.atr ? STRATEGIES_DATA.atr.metrics.totalNetProfitStr : '';
-                showToast(`已一鍵套用【布林_ATR基準最佳化參數組合 (基準A：130%維持率 + 動態浮動槓桿)】！ATR 淨利 ${{atrPnl}} TWD`, 'success');
+                showToast(`已一鍵套用【布林_ATR基準最佳化參數組合 (基準A：130%維持率 + 方案一 30m&1h 共振)】！ATR 淨利 ${{atrPnl}} TWD`, 'success');
             }} else {{
                 strategyConfigs.atr = JSON.parse(JSON.stringify(defaultStrategyConfigs.atr));
                 executeDynamicBacktest('atr', strategyConfigs.atr, true);
                 populateModalInputs('atr');
-                showToast('已恢復布林_ATR基準策略為【初始基準參數 (基準A：130%維持率)】', 'info');
+                showToast('已恢復布林_ATR基準策略為【初始基準參數 (基準A：130%維持率 + 方案一 30m&1h 共振)】', 'info');
             }}
         }}
 
@@ -5605,6 +5692,13 @@ def build_html_content(
             setFieldSync('bb-len', cfg.bb_length);
             setFieldSync('bb-mult', cfg.bb_mult);
             setFieldSync('pullback', cfg.pullback_ratio);
+            setFieldSync('htf-ma', cfg.htf_ma_length || 20);
+
+            const selHtfCont = document.getElementById('sel-htf-cont');
+            const badgeHtfCont = document.getElementById('val-badge-htf-cont');
+            const htfEnabled = (cfg.enable_htf_continuation !== undefined) ? Boolean(cfg.enable_htf_continuation) : true;
+            if (selHtfCont) selHtfCont.value = htfEnabled ? 'true' : 'false';
+            if (badgeHtfCont) badgeHtfCont.textContent = htfEnabled ? '啟用 (30m+1h 共振)' : '關閉 (僅拉回)';
 
             const selSizing = document.getElementById('sel-sizing-mode');
             const badgeSizing = document.getElementById('val-badge-sizing');
@@ -5653,6 +5747,7 @@ def build_html_content(
             if (num) num.value = val;
             if (badge) {{
                 if (idPrefix === 'pullback') badge.textContent = `${{val}} (${{Math.round(val * 100)}}% K棒)`;
+                else if (idPrefix === 'htf-ma') badge.textContent = `${{val}} MA`;
                 else if (idPrefix === 'initial-capital') badge.textContent = `${{Math.round(Number(val) || 0).toLocaleString('zh-TW')}} 元`;
                 else if (idPrefix === 'margin-ratio') {{
                     const reqPerLot = Math.round(35050 * (Number(val) / 100));
@@ -5710,7 +5805,7 @@ def build_html_content(
             }});
 
             const fieldKeys = [
-                'bb-len', 'bb-mult', 'pullback',
+                'bb-len', 'bb-mult', 'pullback', 'htf-ma',
                 'atr-len', 'atr-sig', 'initial-capital', 'margin-ratio', 'leverage', 'slippage'
             ];
 
@@ -5724,6 +5819,7 @@ def build_html_content(
                         num.value = range.value;
                         if (badge) {{
                             if (k === 'pullback') badge.textContent = `${{range.value}} (${{Math.round(range.value * 100)}}% K棒)`;
+                            else if (k === 'htf-ma') badge.textContent = `${{range.value}} MA`;
                             else if (k === 'initial-capital') badge.textContent = `${{Math.round(Number(range.value) || 0).toLocaleString('zh-TW')}} 元`;
                             else if (k === 'margin-ratio') {{
                                 const reqPerLot = Math.round(35050 * (Number(range.value) / 100));
@@ -5738,6 +5834,7 @@ def build_html_content(
                         range.value = num.value;
                         if (badge) {{
                             if (k === 'pullback') badge.textContent = `${{num.value}} (${{Math.round(num.value * 100)}}% K棒)`;
+                            else if (k === 'htf-ma') badge.textContent = `${{num.value}} MA`;
                             else if (k === 'initial-capital') badge.textContent = `${{Math.round(Number(num.value) || 0).toLocaleString('zh-TW')}} 元`;
                             else if (k === 'margin-ratio') {{
                                 const reqPerLot = Math.round(35050 * (Number(num.value) / 100));
@@ -5774,6 +5871,16 @@ def build_html_content(
                 }});
             }}
 
+            const selHtfCont = document.getElementById('sel-htf-cont');
+            if (selHtfCont) {{
+                selHtfCont.addEventListener('change', () => {{
+                    const badgeHtfCont = document.getElementById('val-badge-htf-cont');
+                    if (badgeHtfCont) {{
+                        badgeHtfCont.textContent = (selHtfCont.value === 'true') ? '啟用 (30m+1h 共振)' : '關閉 (僅拉回)';
+                    }}
+                }});
+            }}
+
             const numComm = document.getElementById('num-commission');
             if (numComm) {{
                 numComm.addEventListener('input', () => {{
@@ -5789,6 +5896,9 @@ def build_html_content(
                     cfg.bb_mult = Number(document.getElementById('num-bb-mult').value);
                     cfg.pullback_ratio = Number(document.getElementById('num-pullback').value);
                     if (selSizing) cfg.position_sizing_mode = selSizing.value;
+                    if (selHtfCont) cfg.enable_htf_continuation = (selHtfCont.value === 'true');
+                    const htfMaEl = document.getElementById('num-htf-ma');
+                    if (htfMaEl) cfg.htf_ma_length = Math.max(2, Number(htfMaEl.value) || 20);
 
                     cfg.atr_length = Number(document.getElementById('num-atr-len').value);
                     cfg.atr_sig_length = Number(document.getElementById('num-atr-sig').value);

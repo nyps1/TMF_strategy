@@ -95,6 +95,54 @@ class BollingerPullbackStrategy(BaseStrategy):
             stop_loss_price=stop_loss_price,
         )
 
+    def _compute_htf_slopes(
+        self,
+        history_bars: List[BarData],
+        current_ts: int,
+    ) -> tuple[float, float]:
+        """
+        從歷史 5 分 K 序列聚合已完整收盤之 30 分 K 與 1 小時 K，計算大週期 SMA 斜率。
+        - 30 分 K (標籤 b_ts) 於 b_ts + 1500 秒收盤。
+        - 1 小時 K (標籤 b_ts) 於 b_ts + 3300 秒收盤。
+
+        參數:
+            history_bars (List[BarData]): 已收盤之 5 分 K 歷史序列。
+            current_ts (int): 當前 Bar 2 收盤時間戳 (秒)。
+
+        返回:
+            tuple[float, float]: (slope_30m, slope_1h)。
+        """
+        ma_len = int(getattr(self.config, "htf_ma_length", 20) or 20)
+        if not history_bars or ma_len <= 0:
+            return 0.0, 0.0
+
+        buckets_30m: Dict[int, float] = {}
+        buckets_1h: Dict[int, float] = {}
+        for b in history_bars:
+            b30 = (int(b.timestamp) // 1800) * 1800
+            if b30 + 1500 <= current_ts:
+                buckets_30m[b30] = float(b.close)
+            b1h = (int(b.timestamp) // 3600) * 3600
+            if b1h + 3300 <= current_ts:
+                buckets_1h[b1h] = float(b.close)
+
+        c30 = [buckets_30m[k] for k in sorted(buckets_30m.keys())]
+        c1h = [buckets_1h[k] for k in sorted(buckets_1h.keys())]
+
+        slope_30m = 0.0
+        if len(c30) >= ma_len + 1:
+            ma_cur = sum(c30[-ma_len:]) / ma_len
+            ma_prev = sum(c30[-ma_len - 1 : -1]) / ma_len
+            slope_30m = ma_cur - ma_prev
+
+        slope_1h = 0.0
+        if len(c1h) >= ma_len + 1:
+            ma_cur = sum(c1h[-ma_len:]) / ma_len
+            ma_prev = sum(c1h[-ma_len - 1 : -1]) / ma_len
+            slope_1h = ma_cur - ma_prev
+
+        return slope_30m, slope_1h
+
     def on_bar_close(
         self,
         bar: BarData,
@@ -155,18 +203,27 @@ class BollingerPullbackStrategy(BaseStrategy):
 
         # 4. 空倉中：執行三根 K 棒狀態機進場決策
         if current_side == PositionSide.NONE:
-            # 狀態 A: 檢核當前收盤棒是否為「Bar 2 拉回確認棒」
+            # 狀態 A: 檢核當前收盤棒是否為「Bar 2 確認棒」
             if self.pending_signal_side != PositionSide.NONE:
                 target_side = self.pending_signal_side
                 sl_price = self.signal_bar_extreme
                 self.pending_signal_side = PositionSide.NONE  # 評估完畢清除待確認標記
+                s30, s1h = self._compute_htf_slopes(history_bars, bar.timestamp)
 
                 if target_side == PositionSide.LONG:
-                    # 多頭確認條件: 既不追高 (close <= close[1]) 且防守於頂部 1/4 強勢支撐 (close >= q1)
-                    is_confirmed = (bar.close <= self.signal_bar_close) and (bar.close >= self.signal_bar_q1)
-                    if is_confirmed:
+                    # 情境一 (標準淺幅拉回): 既不追高 (close <= close[1]) 且防守於頂部 1/4 強勢支撐 (close >= q1)
+                    is_pullback = (bar.close <= self.signal_bar_close) and (bar.close >= self.signal_bar_q1)
+                    # 情境三 (方案一動能延續): Bar 2 繼續創高 (close > close[1]) 且 30m 與 1h 均線雙重上彎
+                    is_continuation = (
+                        getattr(self.config, "enable_htf_continuation", True)
+                        and (bar.close > self.signal_bar_close)
+                        and (s30 > 0)
+                        and (s1h > 0)
+                    )
+                    if is_pullback or is_continuation:
                         self.highest_since_entry = bar.close
                         self.lowest_since_entry = bar.close
+                        mode_tag = "拉回確認" if is_pullback else "30m&1h均線共振延續"
                         return SignalEvent(
                             timestamp=bar.timestamp,
                             time_str=dt_str,
@@ -174,16 +231,24 @@ class BollingerPullbackStrategy(BaseStrategy):
                             side=PositionSide.LONG,
                             price=bar.close,
                             stop_loss_price=sl_price,
-                            reason=f"拉回確認成立立即開盤進場 (做多, 停損 {sl_price:.1f})",
-                            extra={"initial_sl": sl_price, "atr": atr},
+                            reason=f"{mode_tag}成立立即開盤進場 (做多, 停損 {sl_price:.1f})",
+                            extra={"initial_sl": sl_price, "atr": atr, "s30": s30, "s1h": s1h},
                         )
 
                 elif target_side == PositionSide.SHORT:
-                    # 空頭確認條件: 既不追空 (close >= close[1]) 且防守於底部 1/4 強勢壓力 (close <= q1)
-                    is_confirmed = (bar.close >= self.signal_bar_close) and (bar.close <= self.signal_bar_q1)
-                    if is_confirmed:
+                    # 情境一 (標準淺幅反彈): 既不追空 (close >= close[1]) 且防守於底部 1/4 強勢壓力 (close <= q1)
+                    is_pullback = (bar.close >= self.signal_bar_close) and (bar.close <= self.signal_bar_q1)
+                    # 情境三 (方案一動能延續): Bar 2 繼續破底 (close < close[1]) 且 30m 與 1h 均線雙重下彎
+                    is_continuation = (
+                        getattr(self.config, "enable_htf_continuation", True)
+                        and (bar.close < self.signal_bar_close)
+                        and (s30 < 0)
+                        and (s1h < 0)
+                    )
+                    if is_pullback or is_continuation:
                         self.highest_since_entry = bar.close
                         self.lowest_since_entry = bar.close
+                        mode_tag = "反彈確認" if is_pullback else "30m&1h均線共振延續"
                         return SignalEvent(
                             timestamp=bar.timestamp,
                             time_str=dt_str,
@@ -191,8 +256,8 @@ class BollingerPullbackStrategy(BaseStrategy):
                             side=PositionSide.SHORT,
                             price=bar.close,
                             stop_loss_price=sl_price,
-                            reason=f"反彈確認成立立即開盤進場 (放空, 停損 {sl_price:.1f})",
-                            extra={"initial_sl": sl_price, "atr": atr},
+                            reason=f"{mode_tag}成立立即開盤進場 (放空, 停損 {sl_price:.1f})",
+                            extra={"initial_sl": sl_price, "atr": atr, "s30": s30, "s1h": s1h},
                         )
 
             # 狀態 B: 檢核當前收盤棒是否構成「Bar 1 突破訊號棒」

@@ -195,6 +195,76 @@ def calculate_supertrend_series(
     return df
 
 
+def calculate_htf_ma_slopes(
+    df: pd.DataFrame,
+    ma_length: int = 20
+) -> pd.DataFrame:
+    """
+    計算大週期（30 分 K 與 1 小時 K）之移動平均線（SMA）與無偷看未來（No Look-Ahead Bias）之斜率序列。
+    - 30 分 K（標籤為 T）涵蓋 [T, T+29m59s]，其完整收盤對應之 5 分 K 時間戳為 T + 25m。
+    - 1 小時 K（標籤為 T）涵蓋 [T, T+59m59s]，其完整收盤對應之 5 分 K 時間戳為 T + 55m。
+    透過 pd.merge_asof(..., direction='backward') 將已完整收盤之大週期均線斜率對齊回 5 分 K。
+
+    參數:
+        df (pd.DataFrame): 包含 'ts' (或 'datetime') 與 'close' 欄位之 5 分 K DataFrame。
+        ma_length (int): 大週期 SMA 均線週期長度，預設 20。
+
+    返回:
+        pd.DataFrame: 附加 'htf_30m_ma', 'htf_30m_slope', 'htf_1h_ma', 'htf_1h_slope' 欄位之 DataFrame。
+    """
+    ts_col = "ts" if "ts" in df.columns else ("datetime" if "datetime" in df.columns else None)
+    if ts_col is None or df.empty or ma_length <= 0:
+        df["htf_30m_ma"] = np.nan
+        df["htf_30m_slope"] = 0.0
+        df["htf_1h_ma"] = np.nan
+        df["htf_1h_slope"] = 0.0
+        return df
+
+    temp = pd.DataFrame({
+        "_ts": pd.to_datetime(df[ts_col]),
+        "_close": df["close"].astype(float).to_numpy(),
+        "_orig_idx": np.arange(len(df))
+    }).sort_values("_ts")
+
+    indexed = temp.set_index("_ts")["_close"]
+
+    # 1. 聚合 30 分 K 並計算 SMA 與斜率 (標籤 T 於 T + 25 分鐘收盤)
+    c_30m = indexed.resample("30min", closed="left", label="left").last().dropna()
+    df_30m = pd.DataFrame({"htf_30m_ma": c_30m.rolling(window=ma_length).mean()})
+    df_30m["htf_30m_slope"] = df_30m["htf_30m_ma"] - df_30m["htf_30m_ma"].shift(1)
+    df_30m["_close_ts_30m"] = df_30m.index + pd.Timedelta(minutes=25)
+    df_30m = df_30m.reset_index(drop=True).sort_values("_close_ts_30m")
+
+    # 2. 聚合 1 小時 K 並計算 SMA 與斜率 (標籤 T 於 T + 55 分鐘收盤)
+    c_1h = indexed.resample("1h", closed="left", label="left").last().dropna()
+    df_1h = pd.DataFrame({"htf_1h_ma": c_1h.rolling(window=ma_length).mean()})
+    df_1h["htf_1h_slope"] = df_1h["htf_1h_ma"] - df_1h["htf_1h_ma"].shift(1)
+    df_1h["_close_ts_1h"] = df_1h.index + pd.Timedelta(minutes=55)
+    df_1h = df_1h.reset_index(drop=True).sort_values("_close_ts_1h")
+
+    # 3. 以 backward merge_asof 嚴格對齊已收盤之大週期指標 (杜絕偷看未來)
+    merged = pd.merge_asof(
+        temp,
+        df_30m[["_close_ts_30m", "htf_30m_ma", "htf_30m_slope"]],
+        left_on="_ts",
+        right_on="_close_ts_30m",
+        direction="backward"
+    )
+    merged = pd.merge_asof(
+        merged,
+        df_1h[["_close_ts_1h", "htf_1h_ma", "htf_1h_slope"]],
+        left_on="_ts",
+        right_on="_close_ts_1h",
+        direction="backward"
+    ).sort_values("_orig_idx")
+
+    df["htf_30m_ma"] = merged["htf_30m_ma"].to_numpy()
+    df["htf_30m_slope"] = merged["htf_30m_slope"].fillna(0.0).to_numpy()
+    df["htf_1h_ma"] = merged["htf_1h_ma"].to_numpy()
+    df["htf_1h_slope"] = merged["htf_1h_slope"].fillna(0.0).to_numpy()
+    return df
+
+
 def populate_all_indicators(
     df: pd.DataFrame,
     bb_length: int = 20,
@@ -204,6 +274,7 @@ def populate_all_indicators(
     donchian_length: int = 4,
     supertrend_length: int = 10,
     supertrend_multiplier: float = 3.0,
+    htf_ma_length: int = 20,
 ) -> pd.DataFrame:
     """
     批次計算策略所需之所有技術指標並附加至 DataFrame。
@@ -212,5 +283,6 @@ def populate_all_indicators(
     df = calculate_atr(df, length=atr_length, sig_length=atr_sig_length)
     df = calculate_donchian(df, length=donchian_length)
     df = calculate_supertrend_series(df, length=supertrend_length, multiplier=supertrend_multiplier)
+    df = calculate_htf_ma_slopes(df, ma_length=htf_ma_length)
     return df
 

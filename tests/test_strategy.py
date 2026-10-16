@@ -117,6 +117,66 @@ class TestBollingerPullbackStrategy(unittest.TestCase):
         self.assertEqual(sig_sl.side, PositionSide.LONG)
         self.assertEqual(sig_sl.price, 19940.0)
 
+    def test_plan1_htf_continuation_long_and_filter(self):
+        """測試方案一：Bar 2 動能延續突破 (cur_close > signal_bar_close) 搭配 30m & 1h 均線斜率同向過濾"""
+        history = []
+        # 對齊整點時間戳 1700006400 (00:00 UTC)
+        base_time = 1700006400
+
+        # 建立 240 根緩步上升的 5 分 K (構建 >20 根已收盤 1h 與 30m K 棒，使 30m & 1h 20MA 斜率顯著 > 0)，
+        # 最後 20 根保持橫盤收斂，使 5m 布林通道收窄，確保 Bar 1 能明確突破上軌
+        for i in range(260):
+            ts = base_time + i * 300
+            px = 20000.0 + min(i, 240) * 5.0
+            bar = BarData(
+                timestamp=ts,
+                open=px - 5.0,
+                high=px + 10.0,
+                low=px - 10.0,
+                close=px,
+                volume=10,
+                is_closed=True,
+            )
+            history.append(bar)
+            self.strategy.on_bar_close(bar, history, PositionSide.NONE)
+
+        # 重置 pending 狀態以測試明確的 Bar 1 -> Bar 2 情境三動能延續
+        self.strategy.reset()
+
+        # Bar 1: 長紅棒突破布林上軌
+        ts_bar1 = base_time + 260 * 300
+        last_px = 20000.0 + 240 * 5.0
+        bar1 = BarData(
+            timestamp=ts_bar1,
+            open=last_px,
+            high=last_px + 160.0,
+            low=last_px - 10.0,
+            close=last_px + 150.0,
+            volume=50,
+            is_closed=True,
+        )
+        history.append(bar1)
+        sig1 = self.strategy.on_bar_close(bar1, history, PositionSide.NONE)
+        self.assertIsNone(sig1)
+        self.assertEqual(self.strategy.pending_signal_side, PositionSide.LONG)
+
+        # Bar 2: 情境三動能延續 (cur_close > signal_bar_close)，因 30m & 1h 20MA 斜率皆 > 0，方案一應觸發 BUY_OPEN
+        ts_bar2 = base_time + 261 * 300
+        bar2 = BarData(
+            timestamp=ts_bar2,
+            open=bar1.close,
+            high=bar1.close + 40.0,
+            low=bar1.close - 5.0,
+            close=bar1.close + 30.0,
+            volume=40,
+            is_closed=True,
+        )
+        history.append(bar2)
+        sig2 = self.strategy.on_bar_close(bar2, history, PositionSide.NONE)
+        self.assertIsNotNone(sig2)
+        self.assertEqual(sig2.signal_type, SignalType.BUY_OPEN)
+        self.assertIn("30m&1h均線共振延續", sig2.reason)
+
 
 if __name__ == "__main__":
     unittest.main()

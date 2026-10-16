@@ -21,6 +21,7 @@
 | uvicorn      | == 0.29.0 | ASGI 伺服器，負責驅動非同步 FastAPI 與 WebSocket 高頻事件廣播。 |
 | websockets   | == 13.1  | 全雙工 WebSocket 協定核心函式庫，支撐即時行情與策略訊號推播。 |
 | lightweight-charts | == 5.2.0 | 前端專業級 TradingView 高頻 K 線與 Baseline 走勢圖 Canvas 渲染引擎。 |
+| matplotlib   | == 3.10.9 | 繪製高解析度靜態量化分析圖表（多策略累積淨損益曲線、水下回撤圖與實驗矩陣對照圖）。 |
 
 ## 歷史回補功能之依賴說明
 歷史 Tick 回補（`backfill_history_tmf.py`、`services/tick_export/history_backfill.py`、`services/tick_export/monthly_excel.py`）與換月日曆（`services/tick_export/contract_calendar.py`，僅使用 Python 標準函式庫 `datetime`、`re`、`functools`）**未新增任何外部套件**，僅重用上表既有依賴：
@@ -73,6 +74,15 @@ Telegram Bot 雙向互動與持久化佇列推播服務（`services/notification
 | python-dotenv| == 1.0.1 | 自動載入 `.env` 內之 `TELEGRAM_BOT_TOKEN` 與 `SHIOAJI_API_KEY`。 |
 | pandas       | == 2.2.1 | 即時計算最新 5 分 K 布林通道上下軌、ATR 指標與策略暖機時序。 |
 
+## 方案一（大週期 30m & 1h 均線同向動能延續過濾）與 Matplotlib 視覺化分析依賴說明
+跨週期均線斜率對齊引擎（`services/backtest/indicators.py`、`services/backtest/engine.py`、`strategies/bollinger_pullback_strategy.py`）、前端雙指針跨週期回測引擎（`generate_kline_dashboard.py`）與靜態量化視覺化圖表分析引入 `matplotlib` 繪圖套件並重用 `pandas` / `numpy`：
+
+| Package Name | Version | Purpose（於方案一跨週期過濾與視覺化分析中的用途） |
+|--------------|---------|---------|
+| matplotlib   | == 3.10.9 | 繪製 2x2 高解析度策略實證對照圖表（權益曲線、水下回撤、實驗矩陣總淨利與勝率／均贏雙軸圖）。 |
+| pandas       | == 2.2.1 | 透過 `resample('30min')`、`resample('1h')` 與 `merge_asof(..., direction='backward')` 嚴格無偷看未來對齊跨週期均線斜率。 |
+| numpy        | == 1.26.4 | 向量化計算 `htf_30m_slope` 與 `htf_1h_slope` 序列。 |
+
 ## 安裝指令
 
 請於 Python 環境中執行以下指令以安裝依賴：
@@ -86,5 +96,3 @@ pip install -r requirements.txt
 ```bash
 cd frontend && npm install lightweight-charts
 ```
-
-

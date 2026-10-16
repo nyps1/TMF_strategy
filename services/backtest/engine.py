@@ -221,6 +221,7 @@ class BacktestEngine:
             donchian_length=self.config.donchian_length,
             supertrend_length=self.config.supertrend_length,
             supertrend_multiplier=self.config.supertrend_multiplier,
+            htf_ma_length=self.config.htf_ma_length,
         )
 
         n_bars = len(df)
@@ -241,6 +242,8 @@ class BacktestEngine:
         donchian_lows = df["donchian_low"].to_numpy()
         st_vals = df["supertrend_val"].to_numpy()
         st_dirs = df["supertrend_dir"].to_numpy()
+        htf_30m_slopes = df["htf_30m_slope"].to_numpy()
+        htf_1h_slopes = df["htf_1h_slope"].to_numpy()
 
         for i in range(1, n_bars):
             ts = timestamps[i]
@@ -355,16 +358,32 @@ class BacktestEngine:
             if self.position.side == PositionSide.NONE and self.entry_ready_side == PositionSide.NONE:
                 # 1. 檢核是否有前一根剛成立的候選訊號棒需做「第二根確認」
                 if self.pending_signal_side != PositionSide.NONE and (i - 1 == self.signal_bar_idx):
+                    s30 = htf_30m_slopes[i]
+                    s1h = htf_1h_slopes[i]
                     if self.pending_signal_side == PositionSide.LONG:
-                        # 多頭確認條件 (嚴格拉回確認版): 既不追高 (close <= close[1]) 且防守於頂部 1/4 強勢支撐 (close >= q1_long)
-                        is_confirmed = (cur_close <= self.signal_bar_close) and (cur_close >= self.signal_bar_q1)
-                        if is_confirmed:
+                        # 情境一 (標準淺幅拉回): 既不追高 (close <= close[1]) 且防守於頂部 1/4 強勢支撐 (close >= q1_long)
+                        is_pullback = (cur_close <= self.signal_bar_close) and (cur_close >= self.signal_bar_q1)
+                        # 情境三 (方案一動能延續): Bar 2 收盤繼續創高 (close > close[1])，且 30m 與 1h 均線雙重上彎共振
+                        is_continuation = (
+                            self.config.enable_htf_continuation
+                            and (cur_close > self.signal_bar_close)
+                            and (s30 > 0)
+                            and (s1h > 0)
+                        )
+                        if is_pullback or is_continuation:
                             self.entry_ready_side = PositionSide.LONG
                             self.entry_sl_price = self.signal_bar_extreme
                     elif self.pending_signal_side == PositionSide.SHORT:
-                        # 空頭確認條件 (嚴格拉回確認版): 既不追空 (close >= close[1]) 且防守於底部 1/4 強勢壓力 (close <= q1_short)
-                        is_confirmed = (cur_close >= self.signal_bar_close) and (cur_close <= self.signal_bar_q1)
-                        if is_confirmed:
+                        # 情境一 (標準淺幅反彈): 既不追空 (close >= close[1]) 且防守於底部 1/4 強勢壓力 (close <= q1_short)
+                        is_pullback = (cur_close >= self.signal_bar_close) and (cur_close <= self.signal_bar_q1)
+                        # 情境三 (方案一動能延續): Bar 2 收盤繼續破底 (close < close[1])，且 30m 與 1h 均線雙重下彎共振
+                        is_continuation = (
+                            self.config.enable_htf_continuation
+                            and (cur_close < self.signal_bar_close)
+                            and (s30 < 0)
+                            and (s1h < 0)
+                        )
+                        if is_pullback or is_continuation:
                             self.entry_ready_side = PositionSide.SHORT
                             self.entry_sl_price = self.signal_bar_extreme
 
