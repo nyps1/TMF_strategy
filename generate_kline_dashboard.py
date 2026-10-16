@@ -3341,6 +3341,26 @@ def build_html_content(
             }});
         }}
 
+        window.barDatetimeMap = new Map();
+
+        // 將 Lightweight Charts 時間戳轉換為台灣盤面時間字串 (避免瀏覽器本地時區重複 +8 小時偏移)
+        function formatBarTimestamp(ts, fallbackDatetime) {{
+            if (fallbackDatetime) return String(fallbackDatetime);
+            const numTs = Number(ts);
+            if (!numTs || isNaN(numTs)) return '';
+            if (window.barDatetimeMap && window.barDatetimeMap.has(numTs)) {{
+                return window.barDatetimeMap.get(numTs);
+            }}
+            const d = new Date(numTs * 1000);
+            const yyyy = d.getUTCFullYear();
+            const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+            const dd = String(d.getUTCDate()).padStart(2, '0');
+            const hh = String(d.getUTCHours()).padStart(2, '0');
+            const mi = String(d.getUTCMinutes()).padStart(2, '0');
+            const ss = String(d.getUTCSeconds()).padStart(2, '0');
+            return `${{yyyy}}-${{mm}}-${{dd}} ${{hh}}:${{mi}}:${{ss}}`;
+        }}
+
         // 更新績效懸浮數據
         function updatePerfLegend(item) {{
             if (!item) return;
@@ -3349,9 +3369,8 @@ def build_html_content(
             perfLegendVal.textContent = `${{sign}}${{val.toLocaleString('zh-TW', {{ minimumFractionDigits: 2, maximumFractionDigits: 2 }})}} TWD`;
             perfLegendVal.style.color = val >= 0 ? '#089981' : '#f23645';
 
-            if (item.time) {{
-                const dt = new Date(item.time * 1000);
-                perfLegendTime.textContent = dt.toLocaleString('zh-TW', {{ hour12: false }});
+            if (item.time || item.datetime) {{
+                perfLegendTime.textContent = formatBarTimestamp(item.time, item.datetime);
             }}
         }}
 
@@ -3518,7 +3537,8 @@ def build_html_content(
 
         // 更新左上角 K 線數據 (包含布林軌道與出場軌道數值)
         function updateLegend(bar, volume, timestamp) {{
-            const dtStr = bar.datetime || (bar.time ? new Date(bar.time * 1000).toLocaleString('zh-TW', {{ hour12: false }}) : '');
+            const ts = Number(timestamp || bar.time);
+            const dtStr = formatBarTimestamp(ts, bar.datetime);
             legendTime.textContent = dtStr;
             legendOpen.textContent = Number(bar.open).toFixed(1);
             legendHigh.textContent = Number(bar.high).toFixed(1);
@@ -3533,7 +3553,6 @@ def build_html_content(
 
             legendVolume.textContent = Number(volume || bar.volume || 0).toLocaleString('zh-TW');
 
-            const ts = Number(timestamp || bar.time);
             // 更新布林數值
             if (legendBbUpper && legendBbMiddle && legendBbLower) {{
                 if (window.bbLookupMap && window.bbLookupMap.has(ts)) {{
@@ -3606,6 +3625,14 @@ def build_html_content(
                 return;
             }}
             currentInterval = intervalKey;
+
+            const dtMap = new Map();
+            rawBars.forEach(b => {{
+                if (b.time && b.datetime) {{
+                    dtMap.set(Number(b.time), String(b.datetime));
+                }}
+            }});
+            window.barDatetimeMap = dtMap;
 
             const cData = rawBars.map(b => ({{
                 time: Number(b.time),
