@@ -315,9 +315,7 @@ def run_single_strategy_backtest(
             "time": ts_sec,
             "value": cum_pnl,
             "equity": eq_val,
-            "drawdown": dd_val,
-            "close": pt["close"],
-            "in_position": pt["in_position"]
+            "drawdown": dd_val
         })
 
     # 3. 序列化逐筆交易明細
@@ -493,8 +491,21 @@ def build_html_content(
     返回:
         str: 完整 HTML 頁面內容。
     """
-    data_json = json.dumps(intervals_data, ensure_ascii=False)
-    strategies_json = json.dumps(multi_strategies_data, ensure_ascii=False)
+    compact_intervals: Dict[str, List[List[Any]]] = {}
+    for k, bars in intervals_data.items():
+        compact_intervals[k] = [
+            [
+                int(b["time"]),
+                round(float(b["open"]), 2),
+                round(float(b["high"]), 2),
+                round(float(b["low"]), 2),
+                round(float(b["close"]), 2),
+                int(b["volume"]),
+            ]
+            for b in bars
+        ]
+    data_json = json.dumps(compact_intervals, ensure_ascii=False, separators=(",", ":"))
+    strategies_json = json.dumps(multi_strategies_data, ensure_ascii=False, separators=(",", ":"))
     bars_5m_list = intervals_data.get("5m", [])
     bars_5m_count = len(bars_5m_list)
     bars_1m_list = intervals_data.get("1m", [])
@@ -512,6 +523,7 @@ def build_html_content(
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>微台10 多策略回測與淨值直觀對比儀表板 - 永豐 Shioaji</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23141824'/><path d='M6 22l6-7 5 4 9-11' stroke='%2300e5ff' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
     {script_tag}
     <style>
         * {{
@@ -2269,7 +2281,7 @@ def build_html_content(
         <div class="actions-group">
             <!-- 全畫面純數據視圖 / 雙圖切換按鈕 -->
             <button class="toggle-btn mode-active" id="btn-toggle-layout" title="切換 全畫面數據視圖 / K線雙圖模式 (快捷鍵: Space)">
-                <span id="txt-toggle-layout">數據全畫面 (作用中)</span>
+                <span id="txt-toggle-layout">展開 K 線雙圖</span>
             </button>
             <div id="live-status-badge" class="live-badge offline" title="即時行情 WebSocket 串流狀態">
                 <span class="live-indicator-dot"></span>
@@ -2886,8 +2898,48 @@ def build_html_content(
     </div>
 
     <script>
-        // 資料載入：布林_ATR基準完整數據集合與 11 種週期 K 線
-        const KLINE_DATA = {data_json};
+        // 資料載入：布林_ATR基準完整數據集合與 11 種週期 K 線 (採用緊湊 Tuple 陣列與 Proxy 延遲解包最佳化)
+        const KLINE_RAW = {data_json};
+        const _klineCache = {{}};
+        function _unpackBars(key) {{
+            if (_klineCache[key]) return _klineCache[key];
+            const raw = KLINE_RAW[key] || [];
+            const unpacked = new Array(raw.length);
+            for (let i = 0; i < raw.length; i++) {{
+                const r = raw[i];
+                const ts = r[0];
+                const dt = new Date(ts * 1000).toISOString().slice(0, 19).replace('T', ' ');
+                unpacked[i] = {{
+                    time: ts,
+                    datetime: dt,
+                    open: r[1],
+                    high: r[2],
+                    low: r[3],
+                    close: r[4],
+                    volume: r[5]
+                }};
+            }}
+            _klineCache[key] = unpacked;
+            delete KLINE_RAW[key];
+            return unpacked;
+        }}
+        const KLINE_DATA = new Proxy(_klineCache, {{
+            get(target, prop) {{
+                if (typeof prop === 'string' && (prop in target || prop in KLINE_RAW)) {{
+                    return _unpackBars(prop);
+                }}
+                return target[prop];
+            }},
+            ownKeys() {{
+                return Array.from(new Set([...Object.keys(_klineCache), ...Object.keys(KLINE_RAW)]));
+            }},
+            getOwnPropertyDescriptor(target, prop) {{
+                if (typeof prop === 'string' && (prop in target || prop in KLINE_RAW)) {{
+                    return {{ enumerable: true, configurable: true, value: _unpackBars(prop) }};
+                }}
+                return Object.getOwnPropertyDescriptor(target, prop);
+            }}
+        }});
         const STRATEGIES_DATA = {strategies_json};
 
         let currentInterval = '5m';
@@ -3079,6 +3131,9 @@ def build_html_content(
                         top: 0.08,
                         bottom: 0.22
                     }}
+                }},
+                localization: {{
+                    timeFormatter: (ts) => formatBarTimestamp(ts)
                 }},
                 timeScale: {{
                     borderColor: '#232733',
@@ -3274,6 +3329,9 @@ def build_html_content(
                         bottom: 0.12
                     }}
                 }},
+                localization: {{
+                    timeFormatter: (ts) => formatBarTimestamp(ts)
+                }},
                 timeScale: {{
                     borderColor: '#1e222c',
                     timeVisible: true,
@@ -3400,25 +3458,46 @@ def build_html_content(
             }}
         }}
 
-        // 雙圖時間軸同步聯動
+        // 雙圖時間軸同步聯動 (僅在雙圖展開且時間時序走勢分頁顯示時聯動，避免隱藏狀態下覆蓋 K 線特寫縮放)
         function setupTimeScaleSync() {{
             if (!klineChart || !perfChart) return;
             const klineTimeScale = klineChart.timeScale();
             const perfTimeScale = perfChart.timeScale();
 
+            const isPerfVisible = () => (!isSoloDataMode && perfChartWrapper && perfChartWrapper.style.display !== 'none');
+
             klineTimeScale.subscribeVisibleLogicalRangeChange(range => {{
-                if (isSyncingRange || !range) return;
+                if (isSyncingRange || !range || !isPerfVisible() || currentInterval !== '5m') return;
                 isSyncingRange = true;
                 perfTimeScale.setVisibleLogicalRange(range);
                 isSyncingRange = false;
             }});
 
             perfTimeScale.subscribeVisibleLogicalRangeChange(range => {{
-                if (isSyncingRange || !range) return;
+                if (isSyncingRange || !range || !isPerfVisible() || currentInterval !== '5m') return;
                 isSyncingRange = true;
                 klineTimeScale.setVisibleLogicalRange(range);
                 isSyncingRange = false;
             }});
+        }}
+
+        // 將 K 線可視範圍對焦至最近 N 根 K 棒 (避免 32,000+ 根全擠在一起導致買賣標記重疊難以判讀)
+        function focusRecentKlineBars(bars, visibleCount = 120) {{
+            if (!klineChart || !bars || bars.length === 0) return;
+            if (bars.length <= visibleCount) {{
+                klineChart.timeScale().fitContent();
+                return;
+            }}
+            const fromBar = bars[Math.max(0, bars.length - visibleCount)];
+            const toBar = bars[bars.length - 1];
+            try {{
+                klineChart.timeScale().setVisibleRange({{
+                    from: Number(fromBar.time),
+                    to: Number(toBar.time) + 300
+                }});
+            }} catch (e) {{
+                klineChart.timeScale().fitContent();
+            }}
         }}
 
         // 對齊 Markers 時間戳至當前週期的 K 棒時間
@@ -3520,6 +3599,10 @@ def build_html_content(
 
         // 更新 K 線主圖上的動態出場指標數值 (ATR 基準)
         function updateExitOverlay(bars) {{
+            const exitGroupEl = document.getElementById('legend-exit-group');
+            if (exitGroupEl) {{
+                exitGroupEl.style.display = showExitOverlay ? 'inline-flex' : 'none';
+            }}
             if (!bars || bars.length === 0) return;
             const n = bars.length;
             const highs = bars.map(b => Number(b.high));
@@ -3689,8 +3772,10 @@ def build_html_content(
                 applyMarkersToChart([]);
             }}
 
-            klineChart.timeScale().fitContent();
-            if (perfChart) perfChart.timeScale().fitContent();
+            focusRecentKlineBars(rawBars, 120);
+            if (perfChart && perfChartWrapper && perfChartWrapper.style.display !== 'none') {{
+                perfChart.timeScale().fitContent();
+            }}
             showLastBarData();
         }}
 
@@ -4873,17 +4958,22 @@ def build_html_content(
 
             if (isSoloDataMode) {{
                 if (btn) btn.classList.add('mode-active');
-                if (txt) txt.textContent = '數據全畫面 (作用中)';
+                if (txt) txt.textContent = '展開 K 線雙圖';
                 showToast('已切換為：數據全畫面視圖 (僅顯示量化數據與淨值圖)', 'info');
             }} else {{
                 if (btn) btn.classList.remove('mode-active');
-                if (txt) txt.textContent = '展開 K 線雙圖';
+                if (txt) txt.textContent = '收合 K 線 (數據全畫面)';
                 showToast('已切換為：雙圖聯動視圖 (K 線主圖 + 數據面板)', 'info');
             }}
 
             setTimeout(() => {{
-                if (klineChart && !isSoloDataMode && !skipFitContent) klineChart.timeScale().fitContent();
-                if (perfChart) perfChart.timeScale().fitContent();
+                if (klineChart && !isSoloDataMode && !skipFitContent) {{
+                    const bars = KLINE_DATA[currentInterval] || [];
+                    focusRecentKlineBars(bars, 120);
+                }}
+                if (perfChart && !skipFitContent && perfChartWrapper && perfChartWrapper.style.display !== 'none') {{
+                    perfChart.timeScale().fitContent();
+                }}
                 if (multiCompareChart) multiCompareChart.resizeAndDraw();
                 if (tradeEquityChart) tradeEquityChart.resizeAndDraw();
                 drawPnlHistogram();
@@ -6080,7 +6170,11 @@ def build_html_content(
                     }} else if (tab === tabTradeEquity && tradeEquityChart) {{
                         setTimeout(() => tradeEquityChart.resizeAndDraw(), 50);
                     }} else if (tab === tabCumPnl && perfChart) {{
-                        setTimeout(() => perfChart.timeScale().fitContent(), 50);
+                        setTimeout(() => {{
+                            isSyncingRange = true;
+                            perfChart.timeScale().fitContent();
+                            setTimeout(() => {{ isSyncingRange = false; }}, 120);
+                        }}, 50);
                     }}
                 }});
             }});
@@ -6168,10 +6262,10 @@ def build_html_content(
                 btnToggleExitLine.addEventListener('click', () => {{
                     showExitOverlay = !showExitOverlay;
                     btnToggleExitLine.classList.toggle('active', showExitOverlay);
-                    if (txtToggleExitLine) txtToggleExitLine.textContent = `出場軌道: ${{showExitOverlay ? '顯示' : '隱藏'}}`;
+                    if (txtToggleExitLine) txtToggleExitLine.textContent = `出場指標: ${{showExitOverlay ? '顯示' : '隱藏'}}`;
                     const bars = KLINE_DATA[currentInterval] || [];
                     updateExitOverlay(bars);
-                    showToast(`出場軌道線已${{showExitOverlay ? '開啟顯示' : '隱藏'}}`, 'info');
+                    showToast(`出場指標已${{showExitOverlay ? '開啟顯示' : '隱藏'}}`, 'info');
                 }});
             }}
 
@@ -6205,6 +6299,9 @@ def build_html_content(
                 btn.addEventListener('click', () => {{
                     document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
                     btn.classList.add('active');
+                    if (isSoloDataMode) {{
+                        toggleLayoutMode(true);
+                    }}
                     loadIntervalData(btn.dataset.interval);
                 }});
             }});
@@ -6224,8 +6321,13 @@ def build_html_content(
             const fitBtn = document.getElementById('btn-fit-chart');
             if (fitBtn) {{
                 fitBtn.addEventListener('click', () => {{
-                    if (klineChart && !isSoloDataMode) klineChart.timeScale().fitContent();
-                    if (perfChart) perfChart.timeScale().fitContent();
+                    if (klineChart && !isSoloDataMode) {{
+                        const bars = KLINE_DATA[currentInterval] || [];
+                        focusRecentKlineBars(bars, 120);
+                    }}
+                    if (perfChart && perfChartWrapper && perfChartWrapper.style.display !== 'none') {{
+                        perfChart.timeScale().fitContent();
+                    }}
                     if (multiCompareChart) multiCompareChart.resizeAndDraw();
                     if (tradeEquityChart) tradeEquityChart.resizeAndDraw();
                     drawPnlHistogram();
@@ -6235,8 +6337,13 @@ def build_html_content(
             const resetZoomBtn = document.getElementById('reset-zoom-btn');
             if (resetZoomBtn) {{
                 resetZoomBtn.addEventListener('click', () => {{
-                    if (klineChart && !isSoloDataMode) klineChart.timeScale().fitContent();
-                    if (perfChart) perfChart.timeScale().fitContent();
+                    if (klineChart && !isSoloDataMode) {{
+                        const bars = KLINE_DATA[currentInterval] || [];
+                        focusRecentKlineBars(bars, 120);
+                    }}
+                    if (perfChart && perfChartWrapper && perfChartWrapper.style.display !== 'none') {{
+                        perfChart.timeScale().fitContent();
+                    }}
                 }});
             }}
 

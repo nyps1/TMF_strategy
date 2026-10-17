@@ -220,6 +220,7 @@ class GitHubPagesPublisher:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>微台指 (TMFR1) 量化回測與 K 線互動儀表板</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23131722'/><path d='M8 22V12h3v10H8zm6 2V8h3v16h-3zm6-4v-6h3v6h-3z' fill='%23089981'/></svg>">
     <meta http-equiv="refresh" content="0; url=./kline_dashboard.html">
     <script>
         window.location.replace("./kline_dashboard.html" + window.location.search + window.location.hash);

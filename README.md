@@ -2,15 +2,20 @@
 
 微型台指期 (TMF) 動能布林突破量化回測與高頻時序交易系統
 
+## 線上互動儀表板 (GitHub Pages Live Dashboard)
+- **GitHub Pages 公開網址 (自動轉址入口)**: [https://nyps1.github.io/tmf-dashboard/](https://nyps1.github.io/tmf-dashboard/)
+- **直連儀表板單檔網址**: [https://nyps1.github.io/tmf-dashboard/kline_dashboard.html](https://nyps1.github.io/tmf-dashboard/kline_dashboard.html)
+- **主儲存庫 GitHub Pages 鏡像網址**: [https://nyps1.github.io/TMF_strategy/](https://nyps1.github.io/TMF_strategy/)
+
 ## 專案概述 (Overview)
 本專案採用永豐證券 Shioaji API 與 SQLite 高頻時序資料庫，針對台灣期交所微型台指期近月連續合約 (TMFR1) 進行逐秒/五分 K 棒的事件驅動回測，並以 TradingView 專業規格建構多週期互動式 K 線與累計損益儀表板。
 
-## 策略核心邏輯 (Core Strategy)
-- **週期**: 5 分鐘 K 線 (5m)
-- **動能突破**: 收盤突破布林通道上/下緣 (\( \text{Basis} \pm 1.75\sigma \), 週期 30)
-- **拉回確認**: 第二根 K 棒於突破棒頂部/底部 1/4 區間進行支撐/壓力確認
-- **風控部位管理**: 動態計算安全下單口數 (Safe Qty)，嚴格控管 7.0 倍槓桿與保證金邊界
-- **出場機制**: 盤中觸及前根極值停損，收盤跌破 ATR 動能訊號停利
+## 策略核心邏輯 (Core Strategy — 基底核心與繼承過濾架構)
+- **週期**: 5 分鐘 K 線 (5m) 搭配 30 分鐘 (30m) 與 1 小時 (1h) 雙重高週期均線斜率過濾
+- **基底交易核心 (`BollingerPullbackCoreStrategy`)**: 收盤突破布林通道上/下緣 (\( \text{Basis} \pm 1.75\sigma \), 週期 30)，第二根 K 棒於突破棒頂部/底部 1/4 區間進行支撐/壓力確認
+- **延伸過濾核心 (`BollingerHtfFilterStrategy`)**: 繼承自 `BollingerPullbackCoreStrategy`，透過 Template Method 模式覆寫 `check_htf_trend_continuation()` 與 `check_power_bar_breakout()`，加入 30m + 1h 均線斜率同向動能延續進場與實體 \( \ge 75 \) 點強動能突破（停損設於 Bar 1 實體中點 50% 處）
+- **風控部位管理**: 動態計算安全下單口數 (Safe Qty)，支援 130% 最低保證金維持率動態控管與槓桿上限保護
+- **出場機制**: 盤中觸及前根極值（或強動能棒實體 50% 中點）停損，收盤跌破 ATR 動能訊號停利
 
 ## 專案核心分層架構 (Architecture Layout)
 - `strategies/`: **【決策人物策略庫】**，供決策者專注構思、撰寫與微調策略（包含依特徵命名的 `bollinger_pullback_strategy.py`，通用風控與指標抽離至 `strategies/common/`）
