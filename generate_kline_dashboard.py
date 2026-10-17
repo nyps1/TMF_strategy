@@ -3458,26 +3458,21 @@ def build_html_content(
             }}
         }}
 
-        // 雙圖時間軸同步聯動 (僅在雙圖展開且時間時序走勢分頁顯示時聯動，避免隱藏狀態下覆蓋 K 線特寫縮放)
+        // 雙圖時間軸聯動：時間時序走勢 (perfChart) 保持全區間宏觀視角，點擊特定時間點時可對焦上方 K 線圖，避免 ResizeObserver 反向覆蓋 K 線特寫縮放
         function setupTimeScaleSync() {{
             if (!klineChart || !perfChart) return;
-            const klineTimeScale = klineChart.timeScale();
-            const perfTimeScale = perfChart.timeScale();
-
-            const isPerfVisible = () => (!isSoloDataMode && perfChartWrapper && perfChartWrapper.style.display !== 'none');
-
-            klineTimeScale.subscribeVisibleLogicalRangeChange(range => {{
-                if (isSyncingRange || !range || !isPerfVisible() || currentInterval !== '5m') return;
-                isSyncingRange = true;
-                perfTimeScale.setVisibleLogicalRange(range);
-                isSyncingRange = false;
-            }});
-
-            perfTimeScale.subscribeVisibleLogicalRangeChange(range => {{
-                if (isSyncingRange || !range || !isPerfVisible() || currentInterval !== '5m') return;
-                isSyncingRange = true;
-                klineTimeScale.setVisibleLogicalRange(range);
-                isSyncingRange = false;
+            perfChart.subscribeClick(param => {{
+                if (!param || !param.time || isSoloDataMode) return;
+                const targetTs = Number(param.time);
+                const bars = KLINE_DATA[currentInterval] || [];
+                if (!bars.length || isNaN(targetTs)) return;
+                const spanSec = Math.max(3600, (bars.length > 1 ? (Number(bars[1].time) - Number(bars[0].time)) : 300) * 60);
+                try {{
+                    klineChart.timeScale().setVisibleRange({{
+                        from: targetTs - spanSec,
+                        to: targetTs + spanSec
+                    }});
+                }} catch (e) {{}}
             }});
         }}
 
