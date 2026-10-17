@@ -74,14 +74,14 @@ Telegram Bot 雙向互動與持久化佇列推播服務（`services/notification
 | python-dotenv| == 1.0.1 | 自動載入 `.env` 內之 `TELEGRAM_BOT_TOKEN` 與 `SHIOAJI_API_KEY`。 |
 | pandas       | == 2.2.1 | 即時計算最新 5 分 K 布林通道上下軌、ATR 指標與策略暖機時序。 |
 
-## 方案一（大週期 30m & 1h 均線同向動能延續過濾）與 Matplotlib 視覺化分析依賴說明
-跨週期均線斜率對齊引擎（`services/backtest/indicators.py`、`services/backtest/engine.py`、`strategies/bollinger_pullback_strategy.py`）、前端雙指針跨週期回測引擎（`generate_kline_dashboard.py`）與靜態量化視覺化圖表分析引入 `matplotlib` 繪圖套件並重用 `pandas` / `numpy`：
+## 原版基準核心抽離與方案一（30m & 1h 均線同向動能延續過濾）繼承架構暨 Matplotlib 視覺化依賴說明
+本專案採用模板方法模式（Template Method Pattern）將最原始、未加任何跨週期追價濾網之純拉回核心獨立為父類別（`BaselinePullbackEngine` 與 `BollingerPullbackCoreStrategy`），並由子類別（`HtfMaContinuationEngine` 與 `HtfMaContinuationStrategy`）繼承擴充方案一（開放情境三動能延續 + `30m & 1h 20MA` 同向斜率過濾）及預留 `_pass_entry_filters` 過濾通道鉤子：
 
-| Package Name | Version | Purpose（於方案一跨週期過濾與視覺化分析中的用途） |
+| Package Name | Version | Purpose（於核心繼承架構、跨週期過濾與視覺化分析中的用途） |
 |--------------|---------|---------|
 | matplotlib   | == 3.10.9 | 繪製 2x2 高解析度策略實證對照圖表（權益曲線、水下回撤、實驗矩陣總淨利與勝率／均贏雙軸圖）。 |
 | pandas       | == 2.2.1 | 透過 `resample('30min')`、`resample('1h')` 與 `merge_asof(..., direction='backward')` 嚴格無偷看未來對齊跨週期均線斜率。 |
-| numpy        | == 1.26.4 | 向量化計算 `htf_30m_slope` 與 `htf_1h_slope` 序列。 |
+| numpy        | == 1.26.4 | 向量化計算基礎指標與 `htf_30m_slope`、`htf_1h_slope` 序列，支撐父子類別高速迴圈。 |
 
 ## 安裝指令
 

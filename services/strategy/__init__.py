@@ -11,6 +11,8 @@ from strategies import (
     SignalEvent,
     StrategyConfig,
     BaseStrategy,
+    BollingerPullbackCoreStrategy,
+    HtfMaContinuationStrategy,
     BollingerPullbackStrategy,
 )
 
@@ -20,5 +22,7 @@ __all__ = [
     "SignalEvent",
     "StrategyConfig",
     "BaseStrategy",
+    "BollingerPullbackCoreStrategy",
+    "HtfMaContinuationStrategy",
     "BollingerPullbackStrategy",
 ]

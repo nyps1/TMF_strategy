@@ -18,7 +18,7 @@ from .indicators import (
     populate_all_indicators,
 )
 from .data_loader import DataLoader, get_third_wednesday
-from .engine import BacktestEngine
+from .engine import BaselinePullbackEngine, HtfMaContinuationEngine, BacktestEngine
 from .reporter import BacktestReporter
 
 __all__ = [
@@ -33,6 +33,8 @@ __all__ = [
     "populate_all_indicators",
     "DataLoader",
     "get_third_wednesday",
+    "BaselinePullbackEngine",
+    "HtfMaContinuationEngine",
     "BacktestEngine",
     "BacktestReporter",
 ]

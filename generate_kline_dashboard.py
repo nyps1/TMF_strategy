@@ -28,6 +28,8 @@ import pandas as pd
 
 from services.storage import KlineService
 from services.backtest import (
+    BaselinePullbackEngine,
+    HtfMaContinuationEngine,
     BacktestEngine,
     BacktestConfig,
     BacktestMetrics,
@@ -240,7 +242,7 @@ def run_single_strategy_backtest(
         Dict[str, Any]: 包含 metrics, markers, cumulative_pnl, trades 之字典。
     """
     logger.info(f"正在執行策略回測 [{config.strategy_name} | exit_mode={config.exit_mode}]...")
-    engine = BacktestEngine(config=config)
+    engine = HtfMaContinuationEngine(config=config) if config.enable_htf_continuation else BaselinePullbackEngine(config=config)
     metrics = engine.run(df)
 
     # 1. 建立建倉與平倉 Markers
@@ -5175,6 +5177,46 @@ def build_html_content(
             let runningCumPnl = 0;
             let runningPeakEq = initialCap;
 
+            // 定義原版基準核心 (BaselinePullbackCore) 與繼承擴充之方案一子類別 (HtfMaContinuationCore)
+            class BaselinePullbackCore {{
+                checkBar2Confirm(i, side, curClose, sigClose, sigQ1) {{
+                    if (side === 'LONG') {{
+                        return (curClose <= sigClose) && (curClose >= sigQ1);
+                    }} else if (side === 'SHORT') {{
+                        return (curClose >= sigClose) && (curClose <= sigQ1);
+                    }}
+                    return false;
+                }}
+                passEntryFilters(i, side, curClose) {{
+                    return true;
+                }}
+            }}
+
+            class HtfMaContinuationCore extends BaselinePullbackCore {{
+                constructor(slopes30m, slopes1h) {{
+                    super();
+                    this.slopes30m = slopes30m;
+                    this.slopes1h = slopes1h;
+                }}
+                checkBar2Confirm(i, side, curClose, sigClose, sigQ1) {{
+                    if (super.checkBar2Confirm(i, side, curClose, sigClose, sigQ1)) {{
+                        return true;
+                    }}
+                    const s30 = this.slopes30m[i];
+                    const s1h = this.slopes1h[i];
+                    if (side === 'LONG') {{
+                        return (curClose > sigClose) && (s30 > 0) && (s1h > 0);
+                    }} else if (side === 'SHORT') {{
+                        return (curClose < sigClose) && (s30 < 0) && (s1h < 0);
+                    }}
+                    return false;
+                }}
+            }}
+
+            const confirmEngine = enableHtfCont
+                ? new HtfMaContinuationCore(htf30mSlope, htf1hSlope)
+                : new BaselinePullbackCore();
+
             function isThirdWednesday(tsStr) {{
                 if (!tsStr) return false;
                 const d = new Date(tsStr);
@@ -5310,25 +5352,15 @@ def build_html_content(
                     }}
                 }}
 
-                // C. 第二根確認棒與第一根訊號棒判斷 (方案一：情境一標準拉回 + 30m & 1h 均線雙重同向過濾情境三)
+                // C. 第二根確認棒與第一根訊號棒判斷 (透過 confirmEngine 繼承鏈檢核)
                 if (posSide === 'NONE' && entryReadySide === 'NONE') {{
                     if (pendingSignalSide !== 'NONE' && (i - 1 === signalBarIdx)) {{
-                        const s30 = htf30mSlope[i];
-                        const s1h = htf1hSlope[i];
-                        if (pendingSignalSide === 'LONG') {{
-                            const isPullback = (curClose <= signalBarClose) && (curClose >= signalBarQ1);
-                            const isCont = enableHtfCont && (curClose > signalBarClose) && (s30 > 0) && (s1h > 0);
-                            if (isPullback || isCont) {{
-                                entryReadySide = 'LONG';
-                                entrySlPrice = signalBarExtreme;
-                            }}
-                        }} else if (pendingSignalSide === 'SHORT') {{
-                            const isPullback = (curClose >= signalBarClose) && (curClose <= signalBarQ1);
-                            const isCont = enableHtfCont && (curClose < signalBarClose) && (s30 < 0) && (s1h < 0);
-                            if (isPullback || isCont) {{
-                                entryReadySide = 'SHORT';
-                                entrySlPrice = signalBarExtreme;
-                            }}
+                        if (
+                            confirmEngine.checkBar2Confirm(i, pendingSignalSide, curClose, signalBarClose, signalBarQ1) &&
+                            confirmEngine.passEntryFilters(i, pendingSignalSide, curClose)
+                        ) {{
+                            entryReadySide = pendingSignalSide;
+                            entrySlPrice = signalBarExtreme;
                         }}
                         pendingSignalSide = 'NONE';
                     }}

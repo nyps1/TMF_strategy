@@ -24,24 +24,38 @@ from .models import (
     TradeRecord,
     BacktestMetrics,
 )
-from .indicators import populate_all_indicators
+from .indicators import (
+    calculate_bollinger_bands,
+    calculate_atr,
+    calculate_donchian,
+    calculate_supertrend_series,
+    calculate_htf_ma_slopes,
+)
 from .data_loader import get_third_wednesday
 
 logger = logging.getLogger(__name__)
 
 
-class BacktestEngine:
+class BaselinePullbackEngine:
     """
-    事件驅動微台指量化回測引擎。
+    原版基準核心回測引擎 (Pure Baseline Pullback Core Engine — Template Method Base Class)。
+
+    封裝最原始、未加任何跨週期追價濾網之純粹核心規則：
+    1. 動態口數與槓桿風控（基準 A 整戶維持率 130% safe_qty 嚴格計算）。
+    2. 三根 K 棒狀態機（Bar 1 突破布林上下軌 -> Bar 2 嚴格落於頂部/底部 1/4 拉回區間 -> Bar 3 開盤進場）。
+    3. 盤中觸碰停損點觸價出場、收盤 ATR crossunder 動能停利、結算日 13:00 強制平倉。
+    4. 提供受保護之鉤子方法 (_prepare_indicators, _check_bar1_breakout, _check_bar2_confirm, _pass_entry_filters)，
+       供後續子類別透過繼承 (Inheritance) 疊加方案一或其他過濾通道，確保原版核心 100% 獨立零污染。
     """
-    def __init__(self, config: Optional[BacktestConfig] = None):
+
+    def __init__(self, config: Optional[BacktestConfig] = None) -> None:
         """
-        初始化回測引擎。
+        初始化原版基準回測核心引擎。
 
         參數:
             config (Optional[BacktestConfig]): 回測參數設定。若未提供則使用預設值。
         """
-        self.config = config or BacktestConfig()
+        self.config: BacktestConfig = config or BacktestConfig()
         self.reset()
 
     def reset(self) -> None:
@@ -66,15 +80,6 @@ class BacktestEngine:
     def _calculate_safe_qty(self, current_price: float) -> int:
         """
         依據當前帳戶淨值、保證金維持率門檻 (基準 A: 130%) 與單口原始保證金，計算安全可下口數。
-
-        規則說明:
-        1. 硬性開倉門檻: 當帳戶權益低於 1 口原始保證金 (35,050 元) 時，強制回傳 0 口 (禁止開倉)。
-        2. 基準 A (margin_ratio_130 / margin 模式):
-           required_per_lot = margin_req * min_margin_ratio (預設 35,050 * 1.30 = 45,565 元)
-           safe_qty = floor(equity / required_per_lot)
-           若 equity < required_per_lot，回傳 0 口；名目槓桿則隨盤勢點位與淨值動態浮動。
-        3. 名目價值上限模式 (notional 模式):
-           safe_qty = floor(min((equity * max_leverage) / (current_price * point_value), equity / margin_req))
 
         參數:
             current_price (float): 當前市場價格。
@@ -121,7 +126,7 @@ class BacktestEngine:
         exit_time: str,
         raw_exit_price: float,
         reason: ExitReason,
-        apply_slippage: bool = True
+        apply_slippage: bool = True,
     ) -> None:
         """
         執行平倉撮合結算，計入手續費、期交稅與滑價，並更新帳戶淨值與交易紀錄。
@@ -149,7 +154,7 @@ class BacktestEngine:
             gross_points = pos.entry_price - exit_price
 
         gross_pnl = gross_points * self.config.point_value * pos.qty
-        
+
         # 依真實成本版規則精算手續費與期交稅 (math.ceil 取整數)
         entry_tax = math.ceil(pos.entry_price * self.config.point_value * pos.qty * self.config.tax_rate)
         exit_tax = math.ceil(exit_price * self.config.point_value * pos.qty * self.config.tax_rate)
@@ -192,16 +197,128 @@ class BacktestEngine:
             equity_after=round(self.equity, 2),
             contract_value=round(cost_basis, 2),
             effective_leverage=round(effective_leverage, 2),
-            margin_ratio_pct=round(margin_ratio_pct, 2)
+            margin_ratio_pct=round(margin_ratio_pct, 2),
         )
         self.trades.append(trade)
 
         # 重置在手持倉
         self.position = ActivePosition()
 
+    def _prepare_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        準備原版基準核心所需之 5 分 K 基礎指標（布林通道、ATR、唐奇安通道、SuperTrend）。
+        子類別可透過 super()._prepare_indicators(df) 繼承並擴充額外的過濾通道指標。
+
+        參數:
+            df (pd.DataFrame): 原始 5 分 K 資料表。
+
+        返回:
+            pd.DataFrame: 附加基礎技術指標後之 DataFrame。
+        """
+        df = calculate_bollinger_bands(df, length=self.config.bb_length, mult=self.config.bb_mult)
+        df = calculate_atr(df, length=self.config.atr_length, sig_length=self.config.atr_sig_length)
+        df = calculate_donchian(df, length=self.config.donchian_length)
+        df = calculate_supertrend_series(
+            df,
+            length=self.config.supertrend_length,
+            multiplier=self.config.supertrend_multiplier,
+        )
+        return df
+
+    def _check_bar1_breakout(
+        self,
+        i: int,
+        cur_open: float,
+        cur_high: float,
+        cur_low: float,
+        cur_close: float,
+        bb_upper: float,
+        bb_lower: float,
+    ) -> None:
+        """
+        檢核當根 K 棒是否構成「第一根突破訊號棒 (Bar 1)」。
+        若成立則寫入 pending_signal_side、signal_bar_close、signal_bar_q1 與 signal_bar_extreme。
+
+        參數:
+            i (int): 當前 K 棒索引。
+            cur_open (float): 當前開盤價。
+            cur_high (float): 當前最高價。
+            cur_low (float): 當前最低價。
+            cur_close (float): 當前收盤價。
+            bb_upper (float): 當前布林通道上軌。
+            bb_lower (float): 當前布林通道下軌。
+        """
+        if np.isnan(bb_upper) or np.isnan(bb_lower):
+            return
+
+        ratio = self.config.pullback_ratio
+        # 多頭突破: 收盤大於布林上軌且為紅 K
+        if cur_close > bb_upper and cur_close > cur_open:
+            body = cur_close - cur_open
+            self.pending_signal_side = PositionSide.LONG
+            self.signal_bar_idx = i
+            self.signal_bar_close = cur_close
+            self.signal_bar_q1 = cur_close - (body * ratio)
+            self.signal_bar_extreme = cur_low  # 記錄第一根最低價作為多單停損
+
+        # 空頭突破: 收盤小於布林下軌且為黑 K
+        elif cur_close < bb_lower and cur_close < cur_open:
+            body = cur_open - cur_close
+            self.pending_signal_side = PositionSide.SHORT
+            self.signal_bar_idx = i
+            self.signal_bar_close = cur_close
+            self.signal_bar_q1 = cur_close + (body * ratio)
+            self.signal_bar_extreme = cur_high  # 記錄第一根最高價作為空單停損
+
+    def _check_bar2_confirm(
+        self,
+        i: int,
+        target_side: PositionSide,
+        cur_close: float,
+    ) -> bool:
+        """
+        原版基準核心之「第二根確認棒 (Bar 2)」判定規則（僅允許情境一：嚴格淺幅拉回／反彈）。
+        - 多頭：既不追高 (cur_close <= signal_bar_close) 且守住頂部 1/4 防守點 (cur_close >= signal_bar_q1)。
+        - 空頭：既不追空 (cur_close >= signal_bar_close) 且守住底部 1/4 防守點 (cur_close <= signal_bar_q1)。
+
+        參數:
+            i (int): 當前 K 棒索引。
+            target_side (PositionSide): 候選訊號方向 (LONG / SHORT)。
+            cur_close (float): Bar 2 收盤價。
+
+        返回:
+            bool: 若符合原版基準拉回確認則回傳 True，否則回傳 False。
+        """
+        if target_side == PositionSide.LONG:
+            return (cur_close <= self.signal_bar_close) and (cur_close >= self.signal_bar_q1)
+        elif target_side == PositionSide.SHORT:
+            return (cur_close >= self.signal_bar_close) and (cur_close <= self.signal_bar_q1)
+        return False
+
+    def _pass_entry_filters(
+        self,
+        i: int,
+        target_side: PositionSide,
+        cur_close: float,
+    ) -> bool:
+        """
+        進場額外過濾通道鉤子方法 (Filter Channel Hook)。
+        原版基準核心預設不加任何額外過濾（永遠回傳 True）。
+        後續若新增其他過濾通道子類別，可覆寫此方法並呼叫 super()._pass_entry_filters(...)。
+
+        參數:
+            i (int): 當前 K 棒索引。
+            target_side (PositionSide): 準備進場之方向 (LONG / SHORT)。
+            cur_close (float): Bar 2 收盤價。
+
+        返回:
+            bool: 若通過所有過濾通道則回傳 True，否則回傳 False。
+        """
+        return True
+
     def run(self, df: pd.DataFrame) -> BacktestMetrics:
         """
-        執行主回測運算迴圈。
+        執行主回測運算迴圈（Template Method 骨架）。
 
         參數:
             df (pd.DataFrame): 具備 OHLCV 之 K 線時序 DataFrame。
@@ -210,23 +327,15 @@ class BacktestEngine:
             BacktestMetrics: 完整回測績效指標數據。
         """
         self.reset()
-        
-        # 1. 補充計算技術指標
-        df = populate_all_indicators(
-            df,
-            bb_length=self.config.bb_length,
-            bb_mult=self.config.bb_mult,
-            atr_length=self.config.atr_length,
-            atr_sig_length=self.config.atr_sig_length,
-            donchian_length=self.config.donchian_length,
-            supertrend_length=self.config.supertrend_length,
-            supertrend_multiplier=self.config.supertrend_multiplier,
-            htf_ma_length=self.config.htf_ma_length,
-        )
+
+        # 1. 透過多型鉤子方法準備技術指標
+        df = self._prepare_indicators(df)
 
         n_bars = len(df)
         if n_bars < self.config.bb_length + 2:
-            raise ValueError(f"Status: ERROR | Root Cause: K線長度 ({n_bars}) 小於指標最小計算週期 | Suggested Fix: 提供更長時序資料。")
+            raise ValueError(
+                f"Status: ERROR | Root Cause: K線長度 ({n_bars}) 小於指標最小計算週期 | Suggested Fix: 提供更長時序資料。"
+            )
 
         # 預先擷取 NumPy 陣列以確保向量化取用效能
         opens = df["open"].to_numpy()
@@ -242,8 +351,6 @@ class BacktestEngine:
         donchian_lows = df["donchian_low"].to_numpy()
         st_vals = df["supertrend_val"].to_numpy()
         st_dirs = df["supertrend_dir"].to_numpy()
-        htf_30m_slopes = df["htf_30m_slope"].to_numpy()
-        htf_1h_slopes = df["htf_1h_slope"].to_numpy()
 
         for i in range(1, n_bars):
             ts = timestamps[i]
@@ -271,7 +378,7 @@ class BacktestEngine:
                         entry_price=fill_price,
                         entry_time=cur_time_str,
                         sl_price=self.entry_sl_price,
-                        entry_bar_index=i
+                        entry_bar_index=i,
                     )
                 # 清除進場準備標記
                 self.entry_ready_side = PositionSide.NONE
@@ -281,135 +388,103 @@ class BacktestEngine:
             # ----------------------------------------------------
             if self.position.side != PositionSide.NONE:
                 pos = self.position
-                
+
                 # 檢核 1: 換月結算日 13:00 強制平倉
                 if self._is_third_wednesday_settlement(ts):
                     self._close_position(
                         exit_time=cur_time_str,
                         raw_exit_price=cur_close,
-                        reason=ExitReason.ROLLOVER_SETTLEMENT
+                        reason=ExitReason.ROLLOVER_SETTLEMENT,
                     )
 
                 # 檢核 2: 盤中觸碰停損點
                 elif pos.side == PositionSide.LONG and cur_low <= pos.sl_price:
-                    # 跌破停損價 (若開盤即跳空跌破，以開盤價成交)
                     trigger_price = min(cur_open, pos.sl_price)
                     self._close_position(
                         exit_time=cur_time_str,
                         raw_exit_price=trigger_price,
-                        reason=ExitReason.STOP_LOSS
+                        reason=ExitReason.STOP_LOSS,
                     )
 
                 elif pos.side == PositionSide.SHORT and cur_high >= pos.sl_price:
-                    # 突破停損價 (若開盤即跳空突破，以開盤價成交)
                     trigger_price = max(cur_open, pos.sl_price)
                     self._close_position(
                         exit_time=cur_time_str,
                         raw_exit_price=trigger_price,
-                        reason=ExitReason.STOP_LOSS
+                        reason=ExitReason.STOP_LOSS,
                     )
 
                 # 檢核 3: 依設定之 exit_mode 執行停損停利出場
                 elif self.config.exit_mode == "donchian":
-                    # 唐奇安通道出場：跌破前 N 根最低點 (多頭) 或漲破前 N 根最高點 (空頭)
                     if pos.side == PositionSide.LONG and not np.isnan(donchian_lows[i]) and cur_close < donchian_lows[i]:
                         self._close_position(
                             exit_time=cur_time_str,
                             raw_exit_price=cur_close,
-                            reason=ExitReason.DONCHIAN_EXIT
+                            reason=ExitReason.DONCHIAN_EXIT,
                         )
                     elif pos.side == PositionSide.SHORT and not np.isnan(donchian_highs[i]) and cur_close > donchian_highs[i]:
                         self._close_position(
                             exit_time=cur_time_str,
                             raw_exit_price=cur_close,
-                            reason=ExitReason.DONCHIAN_EXIT
+                            reason=ExitReason.DONCHIAN_EXIT,
                         )
 
                 elif self.config.exit_mode == "supertrend":
-                    # 超級趨勢線出場：方向反轉或收盤擊穿不可逆軌道線
                     if pos.side == PositionSide.LONG and (st_dirs[i] == -1 or cur_close < st_vals[i]):
                         self._close_position(
                             exit_time=cur_time_str,
                             raw_exit_price=cur_close,
-                            reason=ExitReason.SUPERTREND_EXIT
+                            reason=ExitReason.SUPERTREND_EXIT,
                         )
                     elif pos.side == PositionSide.SHORT and (st_dirs[i] == 1 or cur_close > st_vals[i]):
                         self._close_position(
                             exit_time=cur_time_str,
                             raw_exit_price=cur_close,
-                            reason=ExitReason.SUPERTREND_EXIT
+                            reason=ExitReason.SUPERTREND_EXIT,
                         )
 
                 elif self.config.exit_mode == "atr":
-                    # ATR 動能停利 (ta.crossunder(atr_val, atr_sig))
-                    if not np.isnan(atr_vals[i]) and not np.isnan(atr_sigs[i]) and not np.isnan(atr_vals[i-1]) and not np.isnan(atr_sigs[i-1]):
-                        prev_above = atr_vals[i-1] >= atr_sigs[i-1]
+                    if (
+                        not np.isnan(atr_vals[i])
+                        and not np.isnan(atr_sigs[i])
+                        and not np.isnan(atr_vals[i - 1])
+                        and not np.isnan(atr_sigs[i - 1])
+                    ):
+                        prev_above = atr_vals[i - 1] >= atr_sigs[i - 1]
                         cur_below = atr_vals[i] < atr_sigs[i]
                         if prev_above and cur_below:
                             self._close_position(
                                 exit_time=cur_time_str,
                                 raw_exit_price=cur_close,
-                                reason=ExitReason.ATR_TAKE_PROFIT
+                                reason=ExitReason.ATR_TAKE_PROFIT,
                             )
 
             # ----------------------------------------------------
             # 步驟 C: 第二根確認棒與第一根訊號棒判斷 (僅在空手時評估)
             # ----------------------------------------------------
             if self.position.side == PositionSide.NONE and self.entry_ready_side == PositionSide.NONE:
-                # 1. 檢核是否有前一根剛成立的候選訊號棒需做「第二根確認」
+                # 1. 檢核是否有前一根剛成立的候選訊號棒需做「第二根確認」與「過濾通道檢核」
                 if self.pending_signal_side != PositionSide.NONE and (i - 1 == self.signal_bar_idx):
-                    s30 = htf_30m_slopes[i]
-                    s1h = htf_1h_slopes[i]
-                    if self.pending_signal_side == PositionSide.LONG:
-                        # 情境一 (標準淺幅拉回): 既不追高 (close <= close[1]) 且防守於頂部 1/4 強勢支撐 (close >= q1_long)
-                        is_pullback = (cur_close <= self.signal_bar_close) and (cur_close >= self.signal_bar_q1)
-                        # 情境三 (方案一動能延續): Bar 2 收盤繼續創高 (close > close[1])，且 30m 與 1h 均線雙重上彎共振
-                        is_continuation = (
-                            self.config.enable_htf_continuation
-                            and (cur_close > self.signal_bar_close)
-                            and (s30 > 0)
-                            and (s1h > 0)
-                        )
-                        if is_pullback or is_continuation:
-                            self.entry_ready_side = PositionSide.LONG
-                            self.entry_sl_price = self.signal_bar_extreme
-                    elif self.pending_signal_side == PositionSide.SHORT:
-                        # 情境一 (標準淺幅反彈): 既不追空 (close >= close[1]) 且防守於底部 1/4 強勢壓力 (close <= q1_short)
-                        is_pullback = (cur_close >= self.signal_bar_close) and (cur_close <= self.signal_bar_q1)
-                        # 情境三 (方案一動能延續): Bar 2 收盤繼續破底 (close < close[1])，且 30m 與 1h 均線雙重下彎共振
-                        is_continuation = (
-                            self.config.enable_htf_continuation
-                            and (cur_close < self.signal_bar_close)
-                            and (s30 < 0)
-                            and (s1h < 0)
-                        )
-                        if is_pullback or is_continuation:
-                            self.entry_ready_side = PositionSide.SHORT
-                            self.entry_sl_price = self.signal_bar_extreme
+                    target_side = self.pending_signal_side
+                    if self._check_bar2_confirm(i, target_side, cur_close) and self._pass_entry_filters(
+                        i, target_side, cur_close
+                    ):
+                        self.entry_ready_side = target_side
+                        self.entry_sl_price = self.signal_bar_extreme
 
                     # 第二根評估結束，清除前期待確認狀態
                     self.pending_signal_side = PositionSide.NONE
 
                 # 2. 檢核當根是否構成「第一根訊號棒」
-                if not np.isnan(bb_uppers[i]) and not np.isnan(bb_lowers[i]):
-                    ratio = self.config.pullback_ratio
-                    # 多頭突破: 收盤大於布林上軌且為紅 K
-                    if cur_close > bb_uppers[i] and cur_close > cur_open:
-                        body = cur_close - cur_open
-                        self.pending_signal_side = PositionSide.LONG
-                        self.signal_bar_idx = i
-                        self.signal_bar_close = cur_close
-                        self.signal_bar_q1 = cur_close - (body * ratio)
-                        self.signal_bar_extreme = cur_low  # 記錄第一根最低價作為多單停損
-
-                    # 空頭突破: 收盤小於布林下軌且為黑 K
-                    elif cur_close < bb_lowers[i] and cur_close < cur_open:
-                        body = cur_open - cur_close
-                        self.pending_signal_side = PositionSide.SHORT
-                        self.signal_bar_idx = i
-                        self.signal_bar_close = cur_close
-                        self.signal_bar_q1 = cur_close + (body * ratio)
-                        self.signal_bar_extreme = cur_high  # 記錄第一根最高價作為空單停損
+                self._check_bar1_breakout(
+                    i=i,
+                    cur_open=cur_open,
+                    cur_high=cur_high,
+                    cur_low=cur_low,
+                    cur_close=cur_close,
+                    bb_upper=bb_uppers[i],
+                    bb_lower=bb_lowers[i],
+                )
 
             # ----------------------------------------------------
             # 步驟 D: 記錄當根權益曲線 (包含未實現損益)
@@ -423,12 +498,14 @@ class BacktestEngine:
                     unrealized_pnl = (pos.entry_price - cur_close) * self.config.point_value * pos.qty
                 current_equity += unrealized_pnl
 
-            self.equity_curve.append({
-                "ts": cur_time_str,
-                "equity": round(current_equity, 2),
-                "close": cur_close,
-                "in_position": self.position.side != PositionSide.NONE
-            })
+            self.equity_curve.append(
+                {
+                    "ts": cur_time_str,
+                    "equity": round(current_equity, 2),
+                    "close": cur_close,
+                    "in_position": self.position.side != PositionSide.NONE,
+                }
+            )
 
         # 回測結束時若仍有部位，強制市價平倉以利指標統計
         if self.position.side != PositionSide.NONE:
@@ -436,7 +513,7 @@ class BacktestEngine:
             self._close_position(
                 exit_time=last_ts,
                 raw_exit_price=closes[-1],
-                reason=ExitReason.ROLLOVER_SETTLEMENT
+                reason=ExitReason.ROLLOVER_SETTLEMENT,
             )
 
         return self._compute_summary_metrics(df)
@@ -525,5 +602,91 @@ class BacktestEngine:
             max_drawdown_pct=round(max_dd_pct, 2),
             sharpe_ratio=round(sharpe, 2),
             trades=self.trades,
-            equity_curve=self.equity_curve
+            equity_curve=self.equity_curve,
         )
+
+
+class HtfMaContinuationEngine(BaselinePullbackEngine):
+    """
+    方案一回測引擎 (Plan 1 HTF MA Continuation Engine — 繼承自原版基準核心 BaselinePullbackEngine)。
+
+    透過繼承原版基準核心 (BaselinePullbackEngine)：
+    1. 覆寫 _prepare_indicators：先呼叫 super()._prepare_indicators(df)，再掛載無偷看未來之 30m 與 1h 20MA 斜率序列。
+    2. 覆寫 _check_bar2_confirm：
+       - 第一步呼叫 super()._check_bar2_confirm(...)，完全保留原版情境一（淺幅拉回）確認邏輯。
+       - 第二步若啟用 enable_htf_continuation，開放情境三（Bar 2 繼續創高/破底）並以 30m & 1h 均線雙重同向斜率過濾。
+    """
+
+    def __init__(self, config: Optional[BacktestConfig] = None) -> None:
+        """
+        初始化方案一跨週期均線動能延續回測引擎。
+
+        參數:
+            config (Optional[BacktestConfig]): 回測參數設定。
+        """
+        super().__init__(config)
+        self._htf_30m_slopes: np.ndarray = np.array([], dtype=float)
+        self._htf_1h_slopes: np.ndarray = np.array([], dtype=float)
+
+    def _prepare_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        繼承原版基準核心指標，並新增 30m 與 1h 大週期均線斜率指標。
+
+        參數:
+            df (pd.DataFrame): 原始 5 分 K 資料表。
+
+        返回:
+            pd.DataFrame: 附加基礎指標與跨週期均線斜率之 DataFrame。
+        """
+        df = super()._prepare_indicators(df)
+        df = calculate_htf_ma_slopes(df, ma_length=self.config.htf_ma_length)
+        self._htf_30m_slopes = df["htf_30m_slope"].to_numpy()
+        self._htf_1h_slopes = df["htf_1h_slope"].to_numpy()
+        return df
+
+    def _check_bar2_confirm(
+        self,
+        i: int,
+        target_side: PositionSide,
+        cur_close: float,
+    ) -> bool:
+        """
+        方案一之 Bar 2 確認邏輯：
+        1. 先委派父類別 (BaselinePullbackEngine) 檢核原版情境一（標準淺幅拉回）。
+        2. 若不屬於情境一且啟用 enable_htf_continuation，則檢核情境三（Bar 2 動能延續 + 30m & 1h 均線雙重同向）。
+
+        參數:
+            i (int): 當前 K 棒索引。
+            target_side (PositionSide): 候選訊號方向 (LONG / SHORT)。
+            cur_close (float): Bar 2 收盤價。
+
+        返回:
+            bool: 若符合原版拉回或方案一跨週期均線延續則回傳 True，否則回傳 False。
+        """
+        # 1. 優先檢核父類別（原版基準核心：情境一標準拉回）
+        if super()._check_bar2_confirm(i, target_side, cur_close):
+            return True
+
+        # 2. 若未啟用方案一動能延續，直接回傳 False
+        if not self.config.enable_htf_continuation:
+            return False
+
+        # 3. 檢核方案一：情境三動能延續 + 30m & 1h 20MA 同向斜率過濾
+        s30 = float(self._htf_30m_slopes[i]) if i < len(self._htf_30m_slopes) else 0.0
+        s1h = float(self._htf_1h_slopes[i]) if i < len(self._htf_1h_slopes) else 0.0
+
+        if target_side == PositionSide.LONG:
+            return (cur_close > self.signal_bar_close) and (s30 > 0.0) and (s1h > 0.0)
+        elif target_side == PositionSide.SHORT:
+            return (cur_close < self.signal_bar_close) and (s30 < 0.0) and (s1h < 0.0)
+        return False
+
+
+class BacktestEngine(HtfMaContinuationEngine):
+    """
+    系統預設回測引擎入口類別 (繼承自 HtfMaContinuationEngine，向下相容所有既有呼叫端)。
+    - 若需單獨執行或繼承最原始純拉回核心，請直接使用或繼承 BaselinePullbackEngine。
+    - 若需在方案一基礎上疊加新過濾通道，可繼承 HtfMaContinuationEngine 或 BaselinePullbackEngine 並覆寫 _pass_entry_filters。
+    """
+
+    pass
