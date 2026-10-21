@@ -491,19 +491,36 @@ def build_html_content(
     返回:
         str: 完整 HTML 頁面內容。
     """
+    def _num(v: float) -> Any:
+        iv = int(round(v))
+        return iv if abs(v - iv) < 1e-6 else round(v, 2)
+
     compact_intervals: Dict[str, List[List[Any]]] = {}
     for k, bars in intervals_data.items():
-        compact_intervals[k] = [
-            [
-                int(b["time"]),
-                round(float(b["open"]), 2),
-                round(float(b["high"]), 2),
-                round(float(b["low"]), 2),
-                round(float(b["close"]), 2),
-                int(b["volume"]),
-            ]
-            for b in bars
-        ]
+        encoded_list: List[List[Any]] = []
+        prev_ts = 0
+        prev_close = 0.0
+        for idx, b in enumerate(bars):
+            ts = int(b["time"])
+            o = float(b["open"])
+            h = float(b["high"])
+            l = float(b["low"])
+            c = float(b["close"])
+            vol = int(b["volume"])
+            if idx == 0:
+                encoded_list.append([ts, _num(o), _num(h), _num(l), _num(c), vol])
+            else:
+                encoded_list.append([
+                    ts - prev_ts,
+                    _num(o - prev_close),
+                    _num(h - o),
+                    _num(l - o),
+                    _num(c - o),
+                    vol,
+                ])
+            prev_ts = ts
+            prev_close = c
+        compact_intervals[k] = encoded_list
     data_json = json.dumps(compact_intervals, ensure_ascii=False, separators=(",", ":"))
     strategies_json = json.dumps(multi_strategies_data, ensure_ascii=False, separators=(",", ":"))
     bars_5m_list = intervals_data.get("5m", [])
@@ -2905,17 +2922,25 @@ def build_html_content(
             if (_klineCache[key]) return _klineCache[key];
             const raw = KLINE_RAW[key] || [];
             const unpacked = new Array(raw.length);
+            let prevTs = 0;
+            let prevClose = 0;
             for (let i = 0; i < raw.length; i++) {{
                 const r = raw[i];
-                const ts = r[0];
+                const ts = (i === 0) ? r[0] : (prevTs + r[0]);
+                const o = (i === 0) ? r[1] : Math.round((prevClose + r[1]) * 100) / 100;
+                const h = (i === 0) ? r[2] : Math.round((o + r[2]) * 100) / 100;
+                const l = (i === 0) ? r[3] : Math.round((o + r[3]) * 100) / 100;
+                const c = (i === 0) ? r[4] : Math.round((o + r[4]) * 100) / 100;
+                prevTs = ts;
+                prevClose = c;
                 const dt = new Date(ts * 1000).toISOString().slice(0, 19).replace('T', ' ');
                 unpacked[i] = {{
                     time: ts,
                     datetime: dt,
-                    open: r[1],
-                    high: r[2],
-                    low: r[3],
-                    close: r[4],
+                    open: o,
+                    high: h,
+                    low: l,
+                    close: c,
                     volume: r[5]
                 }};
             }}
